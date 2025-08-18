@@ -768,7 +768,7 @@ This is the core of the user-facing transparency.
 
 ### Build
 
-- Install Python dependencies with `uv sync`.
+ - Install Python dependencies with `uv sync --extra dev`.
 - Install frontend dependencies with `npm install`.
 - Build the frontend with `npm run build`.
 - Run the API locally with `uv run fastapi dev api/main.py`.
