@@ -9,9 +9,12 @@
 ## 1) Executive Summary
 A collaborative, multi‑agent system that **designs, critiques, and generates** production‑quality MLOps systems. The MVP delivers a **comprehensive architecture report** plus a **code artifact bundle (repo zip)** covering services, IaC, CI, and validation reports—without deploying any cloud resources. The design emphasizes trust: policy checks, cost/latency critics, deterministic diffs, and typed state with an event log.
 
+The mission is to create a sophisticated, collaborative Agentic AI system that automates the end-to-end lifecycle of designing, implementing, and documenting production-quality Machine Learning Operations (MLOps) systems. This project moves beyond simple code generation. It aims to act as an expert MLOps architect and engineer, collaborating with human users to navigate complex trade-offs and build robust, scalable, and maintainable ML systems. The core vision is to drastically reduce the time and expertise required to deploy production-grade ML, transforming a months-long process into a matter of days, while ensuring best practices are followed at every step.
+
+
 **Key decisions for MVP**
-- Dual‑provider LLM stack: **Orchestration** (OpenAI Agents SDK or LangGraph) + **Code generation** (Anthropic Claude Code), behind a common provider interface.
-- Deployment (recommended): **AWS App Runner (web) + App Runner (worker) + RDS Postgres + S3** with a DB‑backed job queue. Alternative options listed in §8.
+- Dual‑provider LLM stack: **Orchestration** (LangGraph) + **Code generation** (Anthropic Claude Code), behind a common provider interface.
+- Deployment (recommended): **AWS App Runner (web) + App Runner (worker) + RDS Postgres + S3** with a DB‑backed job queue. 
 - State: Postgres with **versioned decision sets**, **event log**, and **artifact hashes**.
 - Trust features in MVP: **policy engine**, **two critics (tech & cost)**, **diff‑first UX (git‑backed)**, and **static validation** of generated repos.
 
@@ -54,6 +57,77 @@ Teams waste weeks translating high‑level requirements into consistent, audited
 2) **Planning & Composition**  
    - Agents compose **capability patterns** (ingest, transform, store, feature, train, serve, observe, govern) per cloud.
    - Patterns are opinionated but composable; planner chooses under constraints.
+   - Once all the required inputs are extracted, we trigger a series of Agents in pre-determined fixed order, this corresponds to LLM workflow Pattern rather than letting the Supervisor Agent determining which sub-agents or tools to execute. This determinstic approach provides us with full control and will significantly simplify the overall implementation since we are not relying on the Supervisor Agent determining which sub-agents should be triggerred. This will de-risk the entire application in a major way in terms of evaluation, managing state etc.
+
+Following is the list of Dedicated/Specialized Agents for Planning and Implementing Production Grade End-to-end MLOPs System
+1. Project Stages: An Iterative Path to Production. This agent will work on the following,
+    1. Ideation & Planning
+    2. Model experimentation, Iteration and Prototyping
+    3. Pipelines Development
+    4. Deployment & Serving
+    5. Monitoring & Continual Learning
+2. Versioning and Governance Strategy
+    1. Code
+    2. Infrastructure
+    3. Data
+    4. Prompts
+    5. Models
+3. Data Sourcing, Discovery, and Characteristics
+    1. Data Sourcing & Discovery Plan
+    2. Data Characteristics
+    3. Exploratory Data Analysis
+4. Pipelines/Workflows to be developed: An Operational Blueprint
+    1. Data Ingestion Pipeline
+        1. Batch, Streaming
+        2. Is streaming pipeline needed
+        3. Frequency of ingestion for batch and streaming pipelines
+    2. Feature Engineering Pipeline
+    3. Model Training Pipeline
+    4. Inference Pipeline
+    4. Monitoring & Observability Setup
+    6. Continual Learning & Data Flywheel Pipeline
+5. MLOps Tech Stack: An Architectural Blueprint
+6. Comprehensive ML Testing Strategy
+    1. Data & Features
+    2. Code & Pipelines
+    3. ML Models
+    4. Infrastructure & Serving
+    5. Online Testing / Testing in Production 
+7. Planning Data Engineering and Data Ingestion Pipeline
+    1. The Data Engineering Lifecycle
+    2. Real-Time Streaming Pipeline: Design & Architecture
+8. Planning Feature Engineering Pipelines
+    1. Feature Engineering Lifecycle and Strategy
+    2. List of features
+    3. Batch Feature Pipeline
+    4. Real-Time Streaming Feature Pipeline
+9. Model Development & Iteration
+10. Planning Model Training Pipelines
+11. Planning Deployment, Serving
+12. Planning Inference Pipeline
+13. Monitoring and Observability Plan
+14. Continual Learning & Production Testing
+15. Governance, Ethics & The Human Element
+16. Overall System Architecture
+    1. Unified Architectural Blueprint
+    2. Potential Bottlenecks, Cost and Performance Optimizations
+    3. Estimated Monthly Costs
+    4. Scaling Strategies
+17. Code Implementation: Data Ingestion Pipeline
+18. Code Implementation: Feature Engineering Pipeline
+19. Code Implementation: Model Training Pipeline
+20. Code Implementation: Inference Pipeline
+21. Code Implementation: Monitoring & Observability, Testing in Production Setup
+22. Code Implementation: Continual Learning & Data Flywheel Pipeline Setup
+23. Critic Agent: Will provide a critical review of actions/decisions made by other agents (architectural decisions, choices, evaluates trade-offs, feasibility, risks). These agents can be triggerred 
+    1. at the end of Planning Stage, the Manager Agent can then invoke the appropriate agent prompting it to re-think and update its decision/choice based on the feedback from Critic Agent. 
+    2. at the end of Implementation Stage, to provide a comprehensive feedback on the entire end-to-end MLOPs System.
+
+
+**Context Engineering**
+   1. **System Prompt/Instructions**: Each agent will have dedicated set of instructions. Loaded from markdown file, this will contain all the details required for the agent to make the appropriate architectural choices. It will involve different factors to take into account, choices available, trade-offs, how to make the optimal choice, examples of common patterns/architectural choices etc
+   2. **Reading and Writing State Information From Shared Persistent Memory**: This will be shared amongst all agents.  This will include the extracted user constraints in specified schema, each agent's architectural decisions in fixed schema, critic agent's feedback, user's updated set of requirements/constraints, new sets of decisions from other agents etc. Basically this memory is shared amongst all the agents so that each agent has context of the overall project ensuring that agents do not take sub-optimal decisions working in isolation. This memory will have the entire history of user constraints, agents decisions, critic's feedback etc. We have to ensure that the Agent Loop does not run infinitely, if it runs too long, we may have to have provision for summarising the context to avoid the context getting beyond the context window of the LLMs.
+
 
 3) **Critics & Policy Engine**  
    - **Technical critic:** checks feasibility, coupling, bottlenecks, failure domains.  
@@ -71,27 +145,61 @@ Teams waste weeks translating high‑level requirements into consistent, audited
 6) **Typed State & Event Log**  
    - Postgres models for projects, decision sets, artifacts, agent runs, approvals, cost estimates, and events.
 
+7) **Frontend UI**
+   - 3 columns/panels following the same design patterns of all the major AI/LLM Chat Interface tools such as ChatGPT, Google AI Studio, Anthropic Claude
+      - Left side panel (narrow): Shows list of past chats, settings etc
+      - Centre panel: Chat with Agent, human input Gates, Agent's Rationale/Reasoning Decisions are shown here
+      - Right panel (Canvas): To show generated artifacts (code repo, report), diff 
+   - Modern, minimal, sleek, elegant supporting both light and dark modes.
 ---
 
 ## 6) System Architecture (MVP)
 
 ```mermaid
 flowchart TD
-  U[User] -->|Constraints / Edits| API[FastAPI Web Service]
-  API -->|enqueue| DB[(Postgres)]
-  W[Worker Service] -->|poll jobs| DB
-  W -->|LLM calls (orchestration)| Orchestrator[(OpenAI Agents SDK / LangGraph)]
-  W -->|codegen| CodeGen[(Claude Code via Provider API)]
-  W -->|repo & reports| S3[(S3 Artifacts)]
-  W -->|events, decision sets, runs| DB
-  API -->|diffs & reports| U
+  U[User]
+  IDP[(Cognito or Auth0)]
+  API[App Runner: FastAPI]
+  RDS[(RDS Postgres via RDS Proxy)]
+  W[App Runner: Worker]
+  Orchestrator[(OpenAI Agents SDK / LangGraph)]
+  CodeGen[(Claude Code)]
+  S3[(S3 Artifacts)]
+  CW[(CloudWatch Logs)]
+  EXT[(User Systems)]
+
+  %% Flow
+  U -->|OIDC Login| IDP
+  IDP --> API
+  U <-->|SSE: Reason Cards| API
+  API -->|enqueue or queries| RDS
+  W -->|claim jobs| RDS
+  W -->|LLM orchestration| Orchestrator
+  W -->|code generation| CodeGen
+  W -->|zip & reports| S3
+  API -->|serve signed URLs| U
+  API --> CW
+  W --> CW
+  API -->|webhooks: HMAC| EXT
+
+  %% Styling
+  style U fill:#DCE775,stroke:#333,stroke-width:2px
+  style IDP fill:#FFD54F,stroke:#333,stroke-width:2px
+  style API fill:#90CAF9,stroke:#333,stroke-width:2px
+  style RDS fill:#B0BEC5,stroke:#333,stroke-width:2px
+  style W fill:#81C784,stroke:#333,stroke-width:2px
+  style Orchestrator fill:#BA68C8,stroke:#333,stroke-width:2px
+  style CodeGen fill:#9575CD,stroke:#333,stroke-width:2px
+  style S3 fill:#A1887F,stroke:#333,stroke-width:2px
+  style CW fill:#EF9A9A,stroke:#333,stroke-width:2px
+  style EXT fill:#FFF59D,stroke:#333,stroke-width:2px
 ```
 
 **Notes**
 - Single worker process suffices for MVP; can scale horizontally later.  
 - All long‑running tasks run in the worker; API remains responsive.  
 - DB is the job queue (lightweight): `jobs` table with retries and backoff.
-
+- SSE heartbeats enabled; signed URLs time‑boxed; all DB/S3 access scoped by `project_id`; jobs use SKIP LOCKED + leases.
 ---
 
 ## 7) Data Model (Initial)
@@ -111,45 +219,25 @@ flowchart TD
 
 ---
 
-## 8) Deployment Options (MVP‑friendly)
+## 8) Deployment (MVP‑friendly)
 
-### Option A — **Vercel (API/UI) + tiny worker VM + RDS + S3**
-- **What:** Keep Vercel for web; add one small VM/container (e.g., Fly.io/EC2 t4g.small) as a worker polling the DB.  
-- **Pros:** Fastest to ship; minimal ops; good DX.  
-- **Cons:** Two platforms; custom wiring for networking/secrets; egress between clouds; billing split.  
-- **Fit:** Good for immediate demo/POC; less ideal for enterprise buyers.
 
-### Option B — **AWS App Runner (recommended)**
+### **AWS App Runner**
 - **What:** App Runner service for **FastAPI (web)** and a second App Runner service for the **worker**; **RDS Postgres**; **S3** for artifacts.  
-- **Pros:** Fully managed build/deploy, HTTPS, autoscaling without cluster mgmt; single‑cloud story; simplest AWS path.  
+- **Pros:** Fully managed build/deploy, HTTPS, autoscaling without cluster mgmt; single‑cloud story; simplest AWS path  
 - **Cons:** Limited background job primitives (we roll our own via DB); fewer knobs than ECS.  
 - **Fit:** Best MVP trade‑off: low ops, unified cloud, straightforward scale to SQS later.
 
-### Option C — **ECS on Fargate (web + worker) + RDS + S3**
-- **What:** One ECS service for API; one ECS service for worker; optional **SQS** instead of DB‑backed jobs.  
-- **Pros:** Mature, flexible networking/IAM; easy path to queues, batched workers, and private subnets.  
-- **Cons:** More infra to set up (task defs, ALB, IAM, logs).  
-- **Fit:** Great when you want **SQS** right away and stricter VPC/IAM controls.
-
-### Option D — **AWS Lambda + API Gateway + (SQS + Lambda worker) + RDS**
-- **What:** API in Lambda; long tasks enqueued to SQS; Lambda workers process and write to RDS/S3.  
-- **Pros:** Serverless scale‑to‑zero; no container mgmt.  
-- **Cons:** Concurrency/timeout limits; cold starts; coordination complexity for multi‑step jobs.  
-- **Fit:** Works if tasks can be chunked <15min and you want pure serverless.
-
-### Option E — **Elastic Beanstalk (web + worker tiers) + RDS + S3**
-- **What:** Classic PaaS; separate worker environment consumes SQS.  
-- **Pros:** Simple setup; good for teams familiar with Beanstalk.  
-- **Cons:** Older stack; less momentum vs App Runner/ECS.  
-- **Fit:** Acceptable if team has Beanstalk experience; otherwise prefer B or C.
-
-**Recommendation for MVP:** **Option B (App Runner + RDS + S3)**. It’s one cloud, low‑ops, supports the **single worker** pattern today, and upgrades cleanly:
+It’s one cloud, low‑ops, supports the **single worker** pattern today, and upgrades cleanly:
 - Add **SQS** later without changing the API/worker services.  
 - Migrate worker to **ECS/Fargate** if you need CPU‑heavy workloads.
 
 ---
 
 ## 9) Tech Stack (MVP)
+**Frontend**
+- NextJS 14+, TypeScript, Tailwind CSS, Shadcn UI
+
 **Backend & Orchestration**  
 - FastAPI, Pydantic, SQLAlchemy.  
 - Orchestration: OpenAI Agents SDK **or** LangGraph.  
@@ -245,7 +333,7 @@ flowchart TD
 ---
 
 ## 15) Non‑Functional Requirements
-- **SLOs (MVP):** p95 plan roundtrip ≤ 2 min; artifact generation ≤ 5 min; availability 99.5%.  
+- **SLOs (MVP):** p95 plan roundtrip ≤ 5 min; artifact generation ≤ 10 min; availability 99.5%.  
 - **Scalability:** horizontal App Runner/ECS scale; DB connection pooling; backpressure via job polling.  
 - **Reliability:** idempotent job execution keyed by decision set; exponential backoff.
 
@@ -260,7 +348,7 @@ flowchart TD
 ---
 
 ## 17) Decision: Deployment Choice (for this MVP)
-**Adopt Option B (AWS App Runner + RDS + S3)**. Rationale: single‑cloud buyer appeal, minimal ops, clean path to SQS/ECS later without redesign. If the team prefers deeper VPC/IAM control from day one, choose Option C (ECS Fargate) with SQS.
+**AWS App Runner + RDS + S3**. Rationale: single‑cloud buyer appeal, minimal ops, clean path to SQS/ECS later without redesign.
 
 ---
 
@@ -324,7 +412,7 @@ flowchart TD
 1. **Freeform First:** user writes requirements → extractor maps to a typed **Constraint Schema**.
 2. **Coverage Check:** compute a **Constraint Coverage Score** (e.g., required fields: cloud/region, budget band, workload types, SLOs, data‑class).
 3. **Adaptive Questioner:** if coverage < threshold or constraints conflict, ask the **minimum** set of high‑value questions (batch vs streaming, serverless vs containers, budget band, compliance flags, preferred stack, existing assets).
-4. **Guided Mode (optional):** offer a 2–5 minute wizard up front for users who prefer structure; responses persist as the **Intake Snapshot**.
+4. **Guided Mode:** offer a 2–5 minute wizard up front for users who prefer structure; responses persist as the **Intake Snapshot**.
 5. **Proceed to Planning:** planner composes capability patterns; any remaining gaps are tracked as open questions and surfaced in Reason Cards.
 
 **Constraint Schema (starter fields):** `cloud`, `regions`, `budget_band`, `data_classification`, `sla_latency_ms`, `availability_target`, `throughput`, `workload_types[batch,streaming,online]`, `deployment_pref[serverless,containers]`, `storage_prefs`, `observability_prefs`, `team_constraints (languages, skills)`, `existing_stack`, `compliance (GDPR/HIPAA etc.)`.
@@ -370,7 +458,7 @@ Nodes (in order):
 - **Optimistic locking:** update `decision_sets` with `version` and `updated_at`; on conflict, reload and retry with backoff.
 
 ### 21.4 Provider Abstractions & Resilience
-- Interfaces: `OrchestrationProvider` (OpenAI Agents SDK or LangGraph-native tools) and `CodeGenProvider` (Anthropic Claude Code, optional OpenAI). 
+- Interfaces: `OrchestrationProvider` (LangGraph-native tools) and `CodeGenProvider` (Anthropic Claude Code). 
 - **Schema‑first:** every tool/LLM output validated via Pydantic; failures produce a user‑friendly Reason Card.
 - **Circuit breakers:** cooldown per provider/model on 429/5xx; fall back for *non‑codegen* nodes.
 - **Determinism:** fixed temperature/top‑p; **few‑shot pack registry** loaded by content hash ID.
@@ -514,6 +602,7 @@ Events are `event:` lines with JSON payloads on `data:` lines.
 
 ## 23) Operational Hardening (MVP+)
 This section folds in final guardrails so the MVP feels production‑minded without increasing scope.
+These features are not to be included in initial MVP, can be added once the initial MVP is ready.
 
 ### 23.1 AuthN/AuthZ & Multi‑Tenancy
 - **Identity:** OIDC (Amazon Cognito or Auth0). API validates JWT on every request & SSE connection.
@@ -573,22 +662,4 @@ RETURNING *;
 - **Dashboards:** time‑to‑artifact, SSE disconnect rate, job retries, LLM error codes, cost deltas.
 - **Alerts:** sustained 5xx on API, job retry storms, policy `fail` spikes, budget threshold crossings.
 
-### 23.9 Updated Architecture Diagram (App Runner)
-```mermaid
-flowchart TD
-  U[User] -->|OIDC Login| IDP[(Cognito/Auth0)]
-  IDP --> API[App Runner: FastAPI]
-  U <-->|SSE (Reason Cards)| API
-  API -->|enqueue/queries| RDS[(RDS Postgres via RDS Proxy)]
-  W[App Runner: Worker] -->|claim jobs| RDS
-  W -->|LLM orchestration| Orchestrator[(OpenAI Agents SDK / LangGraph)]
-  W -->|code generation| CodeGen[(Claude Code)]
-  W -->|zip & reports| S3[(S3 Artifacts)]
-  API -->|serve signed URLs| U
-  API --> CW[(CloudWatch Logs)]
-  W --> CW
-  API -->|webhooks (HMAC)| EXT[(User Systems)]
-```
-
-**Notes:** SSE heartbeats enabled; signed URLs time‑boxed; all DB/S3 access scoped by `project_id`; jobs use SKIP LOCKED + leases.
 
