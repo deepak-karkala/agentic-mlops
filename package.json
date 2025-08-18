@@ -1,0 +1,10 @@
+{
+  "name": "agentic-mlops",
+  "private": true,
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "test": "npm --prefix frontend test"
+  }
+}
