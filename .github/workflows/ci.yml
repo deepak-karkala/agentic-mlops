@@ -20,6 +20,6 @@ jobs:
       - name: Run pre-commit
         run: uv run pre-commit run --all-files
       - name: Run pytest
-        run: uv run pytest
+        run: PYTHONPATH=. uv run python -m pytest
       - name: Run npm test
         run: npm test
