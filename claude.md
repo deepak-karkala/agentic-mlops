@@ -762,3 +762,26 @@ This is the core of the user-facing transparency.
     *   The `policy_eval` result is `pass`.
     *   Specific, mandatory "capability patterns" are present in the plan.
 *   The "determinism budget" will be implemented: if a node's schema validation retry loop fails 3 times, it will raise a special exception, and a global error handler in the worker will save the invalid payload to a designated S3 quarantine bucket for triage.
+---
+
+## Development Guidelines
+
+### Build
+
+- Install Python dependencies with `uv sync`.
+- Install frontend dependencies with `npm install`.
+- Build the frontend with `npm run build`.
+- Run the API locally with `uv run fastapi dev api/main.py`.
+- Run the worker locally with `uv run python worker/main.py`.
+
+### Testing
+
+- `pre-commit run --all-files`
+- `pytest`
+- `npm test`
+
+### Commit
+
+- Use conventional commit messages (e.g., `feat: add api route`).
+- Ensure all tests pass and the working tree is clean before committing.
+
