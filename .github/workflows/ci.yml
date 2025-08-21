@@ -40,15 +40,74 @@ jobs:
           fetch-depth: 0
 
       # Claude Code Review
-      - name: Install Claude CLI
-        run: |
-          npm install -g @anthropic-ai/claude-code
-          claude --version || echo "Claude CLI check failed"
+      - name: Setup Python for Claude Review
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install anthropic
 
       - name: Run Claude Code Review
         run: |
-          echo "🤖 Running Claude Code Review..."
-          claude review --format markdown --focus "security,performance,mlops-patterns,error-handling" . > claude-review.txt 2>&1 || echo "Claude review completed"
+          python << 'EOF'
+          import os
+          import anthropic
+          import subprocess
+          
+          # Get changed files
+          try:
+              result = subprocess.run(['git', 'diff', '--name-only', 'HEAD~1'], 
+                                    capture_output=True, text=True)
+              changed_files = [f.strip() for f in result.stdout.split('\n') if f.strip() and f.endswith(('.py', '.js', '.ts', '.tsx'))]
+          except:
+              changed_files = []
+          
+          if not changed_files:
+              with open('claude-review.txt', 'w') as f:
+                  f.write("No code files changed in this PR.")
+              exit(0)
+          
+          # Initialize Claude client
+          client = anthropic.Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
+          
+          reviews = []
+          for file_path in changed_files[:3]:  # Limit to 3 files
+              try:
+                  with open(file_path, 'r') as f:
+                      content = f.read()
+                  
+                  prompt = f"""Please review this {file_path} file for:
+          - Code quality and best practices
+          - Security vulnerabilities
+          - Performance optimizations
+          - MLOps architecture patterns
+          - Error handling and edge cases
+          
+          File: {file_path}
+          ```
+          {content}
+          ```
+          
+          Provide specific, actionable feedback."""
+          
+                  response = client.messages.create(
+                      model="claude-3-5-sonnet-20241022",
+                      max_tokens=1000,
+                      messages=[{"role": "user", "content": prompt}]
+                  )
+                  
+                  reviews.append(f"### {file_path}\n{response.content[0].text}")
+              except Exception as e:
+                  reviews.append(f"### {file_path}\nError reviewing file: {str(e)}")
+          
+          # Write review to file
+          with open('claude-review.txt', 'w') as f:
+              if reviews:
+                  f.write('\n\n'.join(reviews))
+              else:
+                  f.write("No reviews generated.")
+          EOF
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
