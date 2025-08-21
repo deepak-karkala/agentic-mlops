@@ -74,9 +74,18 @@ Required environment variables:
 - Golden runs for agent determinism
 - Static validation for generated code
 
+## Claude Code Review
+
+This project includes automated code review via Claude. To trigger a review:
+
+1. **On Pull Requests**: Comment `@claude review` to get AI-powered code analysis
+2. **Focus Areas**: Security, performance, MLOps patterns, error handling, code quality
+3. **Context Aware**: Claude uses this CLAUDE.md file for project-specific guidance
+
 ## Troubleshooting
 
 - **Database connection issues**: Check RDS Proxy configuration
 - **Job queue stuck**: Verify worker is running and claiming jobs
 - **Frontend build errors**: Ensure Node.js 20+ and clean `npm install`
 - **Deployment failures**: Check AWS credentials and Terraform state
+- **Claude review not working**: Ensure `ANTHROPIC_API_KEY` is set in repository secrets
