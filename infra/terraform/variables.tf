@@ -18,11 +18,13 @@ variable "artifact_bucket_name" {
 variable "api_image" {
   description = "ECR image identifier for API service"
   type        = string
+  default     = ""
 }
 
 variable "worker_image" {
   description = "ECR image identifier for worker service"
   type        = string
+  default     = ""
 }
 
 variable "db_username" {
