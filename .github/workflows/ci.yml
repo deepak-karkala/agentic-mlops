@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
 
@@ -22,7 +24,25 @@ jobs:
       - name: Run pytest
         run: PYTHONPATH=. uv run python -m pytest
       - name: Run npm test
-        run: npm test
+        run: npm test --prefix frontend
+
+  terraform-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.5.0'
+      - name: Terraform Format Check
+        run: terraform fmt -check
+        working-directory: infra/terraform
+      - name: Terraform Init
+        run: terraform init -backend=false
+        working-directory: infra/terraform
+      - name: Terraform Validate
+        run: terraform validate
+        working-directory: infra/terraform
 
   claude-code-review:
     runs-on: ubuntu-latest

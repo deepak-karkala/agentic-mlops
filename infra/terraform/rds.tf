@@ -1,7 +1,7 @@
 # Security group for RDS
 resource "aws_security_group" "rds" {
   name_prefix = "${var.project}-rds-"
-  vpc_id      = var.vpc_id
+  vpc_id      = local.vpc_id
 
   ingress {
     from_port       = 5432
