@@ -28,17 +28,17 @@ resource "aws_db_subnet_group" "default" {
 }
 
 resource "aws_db_instance" "postgres" {
-  identifier              = "${var.project}-db"
-  engine                  = "postgres"
-  engine_version          = "15.3"
-  instance_class          = "db.t3.micro"
-  allocated_storage       = 20
-  username                = var.db_username
-  password                = var.db_password
-  db_subnet_group_name    = aws_db_subnet_group.default.name
-  skip_final_snapshot     = true
-  publicly_accessible     = false
-  vpc_security_group_ids  = [aws_security_group.rds.id]
+  identifier             = "${var.project}-db"
+  engine                 = "postgres"
+  engine_version         = "15.3"
+  instance_class         = "db.t3.micro"
+  allocated_storage      = 20
+  username               = var.db_username
+  password               = var.db_password
+  db_subnet_group_name   = aws_db_subnet_group.default.name
+  skip_final_snapshot    = true
+  publicly_accessible    = false
+  vpc_security_group_ids = [aws_security_group.rds.id]
 }
 
 resource "aws_secretsmanager_secret" "db_credentials" {
@@ -51,10 +51,10 @@ resource "aws_secretsmanager_secret_version" "db_credentials" {
 }
 
 resource "aws_db_proxy" "postgres" {
-  name            = "${var.project}-proxy"
-  engine_family   = "POSTGRESQL"
-  role_arn        = aws_iam_role.rds_proxy.arn
-  vpc_subnet_ids  = local.subnet_ids
+  name                   = "${var.project}-proxy"
+  engine_family          = "POSTGRESQL"
+  role_arn               = aws_iam_role.rds_proxy.arn
+  vpc_subnet_ids         = local.subnet_ids
   vpc_security_group_ids = [aws_security_group.rds.id]
 
   auth {
@@ -66,7 +66,7 @@ resource "aws_db_proxy" "postgres" {
 }
 
 resource "aws_db_proxy_target" "db" {
-  db_proxy_name        = aws_db_proxy.postgres.name
-  target_group_name    = "default"
+  db_proxy_name          = aws_db_proxy.postgres.name
+  target_group_name      = "default"
   db_instance_identifier = aws_db_instance.postgres.id
 }

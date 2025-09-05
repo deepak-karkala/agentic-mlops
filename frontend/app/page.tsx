@@ -1,9 +1,14 @@
 "use client";
 
 import { MessageCircle, Code } from "lucide-react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import ChatInterface from "@/components/chat/chat-interface";
-import CodeCanvas from "@/components/canvas/code-canvas";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../components/ui/tabs";
+import ChatInterface from "../components/chat/chat-interface";
+import CodeCanvas from "../components/canvas/code-canvas";
 
 export default function Home() {
   return (

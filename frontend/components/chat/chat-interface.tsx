@@ -2,10 +2,10 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Send, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Card } from "@/components/ui/card";
-import { Message, ChatState } from "@/types/chat";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { Card } from "../ui/card";
+import { Message, ChatState } from "../../types/chat";
 
 export default function ChatInterface() {
   const [chatState, setChatState] = useState<ChatState>({

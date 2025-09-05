@@ -16,7 +16,7 @@ npm run dev --prefix frontend      # Frontend dev server
 
 # Testing & Quality
 pre-commit run --all-files         # Lint and format
-pytest                             # Python tests
+uv run pytest -v                   # Python tests
 npm test                           # Frontend tests
 
 # Build & Deploy
