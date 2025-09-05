@@ -10,9 +10,9 @@ uv sync --extra dev
 npm install --prefix frontend
 
 # Local development
-uv run fastapi dev api/main.py     # API server
-uv run python worker/main.py       # Worker service
-npm run dev --prefix frontend      # Frontend dev server
+PYTHONPATH=. uv run uvicorn api.main:app --reload    # API server
+uv run python worker/main.py                        # Worker service
+npm run dev --prefix frontend                       # Frontend dev server
 
 # Testing & Quality
 pre-commit run --all-files         # Lint and format
@@ -76,6 +76,7 @@ Required environment variables:
 
 ## Troubleshooting
 
+- **ModuleNotFoundError: No module named 'langgraph'**: Use `PYTHONPATH=. uv run uvicorn api.main:app --reload` instead of `fastapi dev`
 - **Database connection issues**: Check RDS Proxy configuration
 - **Job queue stuck**: Verify worker is running and claiming jobs
 - **Frontend build errors**: Ensure Node.js 20+ and clean `npm install`
