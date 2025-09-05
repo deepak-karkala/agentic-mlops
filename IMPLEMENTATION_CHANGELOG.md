@@ -216,3 +216,8 @@ When completing each issue, add the following section:
 - ✅/❌ Test result 1
 - ✅/❌ Test result 2
 ```
+## 2025-09-05
+
+- Fix Jest path resolution in CI for frontend tests. Root cause: CI runs `npm test --prefix frontend` from the monorepo root, which caused Jest's default `rootDir` to be the repository root instead of the `frontend` app folder. This broke alias and relative imports (e.g., `@/lib/utils` resolving incorrectly), leading to errors like "Cannot find module '../../lib/utils' from 'components/ui/button.tsx'". 
+- Change: set `rootDir: __dirname` in `frontend/jest.config.js`, and make `collectCoverageFrom` patterns explicit with `<rootDir>`. Also added `testPathIgnorePatterns` and `moduleFileExtensions` for consistency.
+- Result: Local and CI runs now resolve modules identically; tests pass with `npm test --prefix frontend`.

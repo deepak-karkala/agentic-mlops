@@ -7,15 +7,20 @@ const createJestConfig = nextJest({
 
 // Add any custom config to be passed to Jest
 const customJestConfig = {
+  // Ensure Jest resolves paths relative to the frontend folder even
+  // when invoked from the monorepo root (e.g., with npm --prefix).
+  rootDir: __dirname,
   setupFilesAfterEnv: ["<rootDir>/jest.setup.js"],
   testEnvironment: "jest-environment-jsdom",
   moduleNameMapper: {
     "^@/(.*)$": "<rootDir>/$1",
   },
+  testPathIgnorePatterns: ["<rootDir>/.next/", "<rootDir>/node_modules/"],
+  moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json", "node"],
   collectCoverageFrom: [
-    "components/**/*.{js,jsx,ts,tsx}",
-    "!components/**/*.d.ts",
-    "!components/**/index.{js,ts}",
+    "<rootDir>/components/**/*.{js,jsx,ts,tsx}",
+    "!<rootDir>/components/**/*.d.ts",
+    "!<rootDir>/components/**/index.{js,ts}",
   ],
 };
 
