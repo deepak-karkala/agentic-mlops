@@ -38,7 +38,7 @@ resource "aws_apprunner_vpc_connector" "main" {
 
 resource "aws_apprunner_service" "api" {
   count = var.api_image != "" ? 1 : 0
-  
+
   service_name = "${var.project}-api"
 
   source_configuration {
@@ -48,9 +48,9 @@ resource "aws_apprunner_service" "api" {
       image_configuration {
         port = "8000"
         runtime_environment_variables = {
-          DATABASE_URL = "postgresql://postgres:${var.db_password}@${aws_db_proxy.postgres.endpoint}:5432/postgres"
+          DATABASE_URL   = "postgresql://postgres:${var.db_password}@${aws_db_proxy.postgres.endpoint}:5432/postgres"
           S3_BUCKET_NAME = aws_s3_bucket.artifacts.bucket
-          AWS_REGION = var.region
+          AWS_REGION     = var.region
         }
       }
     }
@@ -68,13 +68,11 @@ resource "aws_apprunner_service" "api" {
       vpc_connector_arn = aws_apprunner_vpc_connector.main.arn
     }
   }
-
-  service_role_arn = aws_iam_role.api_service.arn
 }
 
 resource "aws_apprunner_service" "worker" {
   count = var.worker_image != "" ? 1 : 0
-  
+
   service_name = "${var.project}-worker"
 
   source_configuration {
@@ -84,9 +82,9 @@ resource "aws_apprunner_service" "worker" {
       image_configuration {
         port = "8080"
         runtime_environment_variables = {
-          DATABASE_URL = "postgresql://postgres:${var.db_password}@${aws_db_proxy.postgres.endpoint}:5432/postgres"
+          DATABASE_URL   = "postgresql://postgres:${var.db_password}@${aws_db_proxy.postgres.endpoint}:5432/postgres"
           S3_BUCKET_NAME = aws_s3_bucket.artifacts.bucket
-          AWS_REGION = var.region
+          AWS_REGION     = var.region
         }
       }
     }
@@ -104,6 +102,4 @@ resource "aws_apprunner_service" "worker" {
       vpc_connector_arn = aws_apprunner_vpc_connector.main.arn
     }
   }
-
-  service_role_arn = aws_iam_role.worker_service.arn
 }

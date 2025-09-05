@@ -105,9 +105,49 @@ This document tracks the step-by-step implementation progress according to the [
 
 ## Next Phase: Durable State & The Job System (Weeks 3-4)
 
-### 🔄 Issue #3: Basic Frontend Chat UI
-**Status**: PENDING  
+### ✅ Issue #3: Basic Frontend Chat UI
+**Status**: COMPLETED  
 **Epic**: Frontend  
+**Completion Date**: 2025-01-05  
+
+#### What Was Implemented
+- [x] Next.js frontend with TypeScript and Tailwind CSS
+- [x] Shadcn UI component library integration
+- [x] Modern chat interface with message bubbles and input
+- [x] Tabbed navigation between Chat and Canvas views
+- [x] Code canvas component for repository visualization
+- [x] Mock file tree structure for generated code display
+- [x] Jest testing framework with React Testing Library
+- [x] Component tests for chat interface and canvas
+- [x] Error handling and loading states
+
+#### Key Files Created/Modified
+- `frontend/app/page.tsx` - Main application with tabbed interface
+- `frontend/components/chat/chat-interface.tsx` - Chat UI with message handling
+- `frontend/components/canvas/code-canvas.tsx` - Code repository visualization
+- `frontend/components/ui/` - Shadcn UI components (Button, Input, Tabs, ScrollArea)
+- `frontend/lib/utils.ts` - Utility functions for component styling
+- `frontend/jest.config.js` - Jest configuration for component testing
+- `frontend/__tests__/` - Component test files
+
+#### Challenges Encountered
+1. **Nested Directory Structure**: Found `frontend/frontend/` nesting causing module resolution issues
+2. **Jest Module Path Issues**: `@/lib/utils` imports failing in tests due to path mapping
+3. **Package.json Corruption**: Lost scripts during file reorganization
+4. **Terraform CI Failures**: Invalid `service_role_arn` arguments in App Runner resources
+
+#### Solutions Implemented
+1. **Fixed Directory Structure**: Consolidated all frontend files into single `/frontend/` directory
+2. **Module Resolution**: Updated Jest config and used relative imports for test files
+3. **Package Restoration**: Restored complete package.json with all dependencies and scripts
+4. **Terraform Validation**: Removed invalid arguments and formatted files properly
+
+#### Testing Results
+- ✅ Chat interface renders with proper styling and layout
+- ✅ Canvas component displays mock repository structure
+- ✅ Component tests pass with Jest and React Testing Library
+- ✅ Terraform validation passes in CI pipeline
+- ✅ Pre-commit hooks execute successfully  
 
 ### 🔄 Issue #4: "Thin Slice" LangGraph Workflow  
 **Status**: PENDING  
@@ -176,3 +216,8 @@ When completing each issue, add the following section:
 - ✅/❌ Test result 1
 - ✅/❌ Test result 2
 ```
+## 2025-09-05
+
+- Fix Jest path resolution in CI for frontend tests. Root cause: CI runs `npm test --prefix frontend` from the monorepo root, which caused Jest's default `rootDir` to be the repository root instead of the `frontend` app folder. This broke alias and relative imports (e.g., `@/lib/utils` resolving incorrectly), leading to errors like "Cannot find module '../../lib/utils' from 'components/ui/button.tsx'". 
+- Change: set `rootDir: __dirname` in `frontend/jest.config.js`, and make `collectCoverageFrom` patterns explicit with `<rootDir>`. Also added `testPathIgnorePatterns` and `moduleFileExtensions` for consistency.
+- Result: Local and CI runs now resolve modules identically; tests pass with `npm test --prefix frontend`.

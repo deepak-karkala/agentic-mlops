@@ -1,9 +1,9 @@
 # ECR repositories for API and Worker images
 resource "aws_ecr_repository" "api" {
   name = "${var.project}/api"
-  
+
   image_tag_mutability = "MUTABLE"
-  
+
   image_scanning_configuration {
     scan_on_push = true
   }
@@ -11,9 +11,9 @@ resource "aws_ecr_repository" "api" {
 
 resource "aws_ecr_repository" "worker" {
   name = "${var.project}/worker"
-  
+
   image_tag_mutability = "MUTABLE"
-  
+
   image_scanning_configuration {
     scan_on_push = true
   }
