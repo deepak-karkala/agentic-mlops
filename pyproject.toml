@@ -9,9 +9,13 @@ dependencies = [
     "uvicorn",
     "langgraph",
     "langchain-core",
+    "langgraph-checkpoint-postgres",
+    "langgraph-checkpoint-sqlite",  # For local development checkpointing
+    "langgraph-checkpoint",         # For in-memory fallback
     "sqlalchemy",
     "alembic",
-    "psycopg2-binary",
+    "psycopg2-binary",  # For SQLAlchemy with PostgreSQL
+    "psycopg[binary]",   # For LangGraph PostgresSaver checkpointing
 ]
 
 [project.optional-dependencies]
