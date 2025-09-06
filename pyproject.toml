@@ -9,6 +9,9 @@ dependencies = [
     "uvicorn",
     "langgraph",
     "langchain-core",
+    "sqlalchemy",
+    "alembic",
+    "psycopg2-binary",
 ]
 
 [project.optional-dependencies]
