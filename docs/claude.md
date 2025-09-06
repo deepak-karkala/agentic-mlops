@@ -36,8 +36,6 @@ npm run test:e2e --prefix frontend # Playwright E2E tests
 - `infra/terraform/` - AWS infrastructure as code
 - `libs/` - Shared Python libraries
 - `tests/` - Test files
-- `docs/` - Documentation files
-- `scripts/` - Deployment and testing scripts
 
 ## Code Style
 
