@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import os
-from typing import List, Literal
+import uuid
+from typing import List, Literal, Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -59,10 +60,12 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: List[ChatMessage]
+    thread_id: Optional[str] = None  # Optional for backward compatibility
 
 
 class ChatResponse(BaseModel):
     messages: List[ChatMessage]
+    thread_id: str  # Always return thread_id for client tracking
 
 
 _graph = build_thin_graph()
@@ -100,16 +103,28 @@ def _convert_from_langchain_message(lc_msg) -> ChatMessage:
 
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(req: ChatRequest) -> ChatResponse:
-    """Invoke the thin-slice LangGraph with provided messages."""
+    """
+    Invoke the thin-slice LangGraph with provided messages and thread_id.
+
+    This endpoint now supports durable state through thread_id. If no thread_id
+    is provided, a new one is generated. The graph state is persisted between
+    calls using the same thread_id.
+    """
+    # Generate thread_id if not provided
+    thread_id = req.thread_id or str(uuid.uuid4())
+
     # Convert input messages to Langchain format
     lc_messages = [_convert_to_langchain_message(m) for m in req.messages]
     state = {"messages": lc_messages}
 
-    # Invoke the graph
-    result = _graph.invoke(state)
+    # Create config with thread_id for checkpointing
+    config = {"configurable": {"thread_id": thread_id}}
+
+    # Invoke the graph with config for persistence
+    result = _graph.invoke(state, config=config)
 
     # Convert all messages back to our format
     all_messages = result.get("messages", [])
     converted_messages = [_convert_from_langchain_message(m) for m in all_messages]
 
-    return ChatResponse(messages=converted_messages)
+    return ChatResponse(messages=converted_messages, thread_id=thread_id)

@@ -223,3 +223,8 @@ frontend/next-env.d.ts
 
 # Deployment configuration
 deployment-config.env
+
+# Local database files
+test.db
+test.db.checkpoints
+*.db.checkpoints
