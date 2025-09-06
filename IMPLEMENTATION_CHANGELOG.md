@@ -267,6 +267,54 @@ This document tracks the step-by-step implementation progress according to the [
 - ✅ Frontend successfully calls API endpoints
 - ✅ Complete deployment pipeline functional  
 
+### ✅ Issue #6: Base Data Models & Migrations
+**Status**: COMPLETED  
+**Epic**: Persistence  
+**Completion Date**: 2025-09-06  
+
+#### What Was Implemented
+- [x] SQLAlchemy models for `projects`, `decision_sets`, `events`, `artifacts`, `agent_runs`, and `jobs`
+- [x] The `decision_sets` table includes a `version` column for optimistic locking
+- [x] Alembic configuration with environment-based DATABASE_URL support  
+- [x] Initial migration created and validated against PostgreSQL schema
+- [x] Comprehensive unit tests for SQLAlchemy models and relationships
+- [x] Database utility functions for engine and session management
+
+#### Key Files Created/Modified
+- `libs/models.py` - Complete SQLAlchemy models with proper relationships and constraints
+- `alembic.ini` - Alembic configuration for database migrations
+- `alembic/env.py` - Environment setup with SQLAlchemy Base integration
+- `alembic/versions/4a829da904d1_initial_migration_with_core_models.py` - Initial migration
+- `tests/test_models.py` - Comprehensive unit tests for all models
+- `pyproject.toml` - Added SQLAlchemy, Alembic, and psycopg2-binary dependencies
+
+#### Challenges Encountered
+1. **Database Compatibility**: PostgreSQL-specific types (JSONB, UUID) needed compatibility layer for testing
+2. **SQLAlchemy 2.0 Migration**: Updated from `declarative_base()` to modern `DeclarativeBase` pattern
+3. **Server Defaults**: PostgreSQL functions like `func.gen_random_uuid()` and `func.now()` not compatible with SQLite for testing
+
+#### Solutions Implemented
+1. **Database Agnostic Models**: Used standard JSON and String types with PostgreSQL optimizations in production
+2. **Modern SQLAlchemy**: Adopted SQLAlchemy 2.0 patterns with proper type annotations and `Mapped` types
+3. **Test Compatibility**: Used Python defaults for timestamps and manual UUID generation in tests
+4. **Comprehensive Testing**: Created 16 unit tests covering all models, relationships, and edge cases
+
+#### Database Schema Design
+- **Projects**: Core entity for MLOps system designs with basic metadata
+- **Decision Sets**: Workflow state with optimistic locking via version column
+- **Events**: Audit trail with JSONB event data for flexibility
+- **Artifacts**: Generated files with S3 storage keys and content hashing
+- **Agent Runs**: Individual agent execution tracking with input/output data
+- **Jobs**: Asynchronous work queue with FOR UPDATE SKIP LOCKED pattern support
+
+#### Testing Results
+- ✅ All existing API tests pass (2/2)
+- ✅ SQLAlchemy models validate correctly
+- ✅ Initial migration generates proper PostgreSQL schema
+- ✅ Pre-commit hooks pass with proper code formatting
+- ✅ Alembic configuration works with environment variables
+- ✅ Database relationships and constraints function correctly
+
 ---
 
 ## Implementation Notes
