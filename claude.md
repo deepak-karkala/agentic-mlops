@@ -17,13 +17,15 @@ npm run dev --prefix frontend                       # Frontend dev server
 # Testing & Quality
 pre-commit run --all-files         # Lint and format
 uv run pytest -v                   # Python tests
-npm test                           # Frontend tests
+npm test                           # Frontend unit tests
+npm run test:e2e --prefix frontend # Playwright E2E tests
 
 # Build & Deploy
 ./1-deploy-infrastructure.sh       # AWS infrastructure
 ./2-build-and-push.sh              # Build and push containers
 ./3-deploy-app-runner.sh           # Deploy applications
-./test-e2e.sh                      # End-to-end testing
+./test-e2e-playwright.sh           # Playwright E2E testing (recommended)
+./test-e2e.sh                      # Basic curl-based testing
 ```
 
 ## Project Structure

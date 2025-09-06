@@ -212,9 +212,31 @@ This document tracks the step-by-step implementation progress according to the [
 - `1-deploy-infrastructure.sh` - Updated to include frontend ECR repository
 - `2-build-and-push.sh` - Added frontend Docker build and push
 - `3-deploy-app-runner.sh` - Updated to deploy frontend service
-- `test-e2e.sh` - End-to-end testing script for deployed services
+- `test-e2e-playwright.sh` - **NEW**: Playwright E2E testing script as specified in Issue #5
+- `frontend/playwright.config.ts` - **NEW**: Playwright configuration for browser testing
+- `frontend/e2e/chat-flow.spec.ts` - **NEW**: Comprehensive E2E test suite
+- `test-e2e.sh` - Basic curl-based testing script for service connectivity
 - `frontend/jest.setup.js` - Added fetch mock for Node.js test environment
-- `CLAUDE.md` - Updated with E2E testing command
+- `CLAUDE.md` - Updated with E2E testing commands
+- `deployment_guide.md` - **Updated**: Added Playwright E2E testing documentation
+
+#### Playwright E2E Testing Implementation
+**Issue #5 Requirement**: "*E2E test using Playwright that opens the deployed URL, sends a message, and asserts that a response appears*"
+
+**Implementation Details**:
+- **Complete Test Suite**: 4 comprehensive test scenarios covering the full user journey
+- **Real Browser Testing**: Tests against actual deployed frontend and backend services
+- **Multi-browser Support**: Configured for Chromium, Firefox, and WebKit
+- **Responsive Testing**: Validates UI across mobile and desktop viewports
+- **Accessibility Testing**: Verifies keyboard navigation and screen reader compatibility
+- **Error Handling**: Tests graceful degradation when API calls fail
+- **Production Testing**: Script validates deployed services before running tests
+
+**Test Scenarios**:
+1. **End-to-end Chat Flow**: User types message → sends → receives response from backend
+2. **API Error Handling**: Simulates API failures and validates error messaging
+3. **UI Responsiveness**: Tests functionality across different screen sizes
+4. **Keyboard Navigation**: Validates accessibility and keyboard interactions
 
 #### Challenges Encountered
 1. **Next.js Containerization**: Required standalone output configuration for proper Docker deployment
@@ -240,7 +262,8 @@ This document tracks the step-by-step implementation progress according to the [
 - ✅ All Python backend tests pass (2/2)
 - ✅ All frontend tests pass (15/15) with API integration
 - ✅ Pre-commit hooks pass with proper code formatting
-- ✅ E2E test script validates deployed services
+- ✅ Playwright E2E tests validate complete user workflows
+- ✅ Basic curl-based E2E test script validates service connectivity
 - ✅ Frontend successfully calls API endpoints
 - ✅ Complete deployment pipeline functional  
 
