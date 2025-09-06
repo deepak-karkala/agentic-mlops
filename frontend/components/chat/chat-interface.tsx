@@ -44,13 +44,36 @@ export default function ChatInterface() {
     setInputValue("");
 
     try {
-      // Mock API call for now - will be replaced with actual API
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      // Call the actual API
+      const apiBaseUrl =
+        process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+      const response = await fetch(`${apiBaseUrl}/api/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messages: [{ role: "user", content: content.trim() }],
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(
+          `API request failed: ${response.status} ${response.statusText}`,
+        );
+      }
+
+      const data = await response.json();
+
+      // Extract the assistant message from the response
+      const assistantContent =
+        data.messages?.find((msg: any) => msg.role === "assistant")?.content ||
+        "No response received from the assistant.";
 
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: `I received your message: "${content}". This is a placeholder response while we build out the backend API.`,
+        content: assistantContent,
         timestamp: new Date(),
       };
 
@@ -60,10 +83,11 @@ export default function ChatInterface() {
         isLoading: false,
       }));
     } catch (error) {
+      console.error("API call failed:", error);
       setChatState((prev) => ({
         ...prev,
         isLoading: false,
-        error: "Failed to send message. Please try again.",
+        error: `Failed to send message: ${error instanceof Error ? error.message : "Unknown error"}`,
       }));
     }
   };

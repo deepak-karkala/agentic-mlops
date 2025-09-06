@@ -8,6 +8,11 @@ output "worker_service_url" {
   value       = length(aws_apprunner_service.worker) > 0 ? aws_apprunner_service.worker[0].service_url : "Not deployed yet - run phase 3"
 }
 
+output "frontend_service_url" {
+  description = "URL of the Frontend App Runner service"
+  value       = length(aws_apprunner_service.frontend) > 0 ? aws_apprunner_service.frontend[0].service_url : "Not deployed yet - run phase 3"
+}
+
 output "db_endpoint" {
   description = "Endpoint of the Postgres instance"
   value       = aws_db_instance.postgres.endpoint
@@ -36,4 +41,9 @@ output "api_ecr_repository_url" {
 output "worker_ecr_repository_url" {
   description = "URL of the Worker ECR repository"
   value       = aws_ecr_repository.worker.repository_url
+}
+
+output "frontend_ecr_repository_url" {
+  description = "URL of the Frontend ECR repository"
+  value       = aws_ecr_repository.frontend.repository_url
 }

@@ -80,8 +80,10 @@ terraform plan \
   -var "private_subnet_ids=[$(echo $SUBNET_IDS | sed 's/,/","/g' | sed 's/^/"/' | sed 's/$/"/']]" \
   -target="aws_ecr_repository.api" \
   -target="aws_ecr_repository.worker" \
+  -target="aws_ecr_repository.frontend" \
   -target="aws_ecr_lifecycle_policy.api" \
   -target="aws_ecr_lifecycle_policy.worker" \
+  -target="aws_ecr_lifecycle_policy.frontend" \
   -target="aws_s3_bucket.artifacts" \
   -target="aws_db_subnet_group.default" \
   -target="aws_security_group.rds" \
@@ -113,8 +115,10 @@ if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
     -var "private_subnet_ids=[$(echo $SUBNET_IDS | sed 's/,/","/g' | sed 's/^/"/' | sed 's/$/"/'")]" \
     -target="aws_ecr_repository.api" \
     -target="aws_ecr_repository.worker" \
+    -target="aws_ecr_repository.frontend" \
     -target="aws_ecr_lifecycle_policy.api" \
     -target="aws_ecr_lifecycle_policy.worker" \
+    -target="aws_ecr_lifecycle_policy.frontend" \
     -target="aws_s3_bucket.artifacts" \
     -target="aws_db_subnet_group.default" \
     -target="aws_security_group.rds" \
@@ -150,4 +154,5 @@ echo "🔍 ECR Repository URLs:"
 cd infra/terraform
 echo "   API: $(terraform output -raw api_ecr_repository_url)"
 echo "   Worker: $(terraform output -raw worker_ecr_repository_url)"
+echo "   Frontend: $(terraform output -raw frontend_ecr_repository_url)"
 cd ../..

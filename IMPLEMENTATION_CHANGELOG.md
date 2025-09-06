@@ -186,9 +186,86 @@ This document tracks the step-by-step implementation progress according to the [
 - ✅ Frontend tests pass
 - ✅ Pre-commit hooks pass with proper code formatting
 
-### 🔄 Issue #5: End-to-End Deployment & Test
-**Status**: PENDING  
+### ✅ Issue #5: End-to-End Deployment & Test
+**Status**: COMPLETED  
 **Epic**: Integration  
+**Completion Date**: 2025-09-05
+
+#### What Was Implemented
+- [x] Frontend deployed to App Runner service with Next.js standalone output
+- [x] API deployed to App Runner service with LangGraph integration
+- [x] Frontend configured to call production API URL via environment variables
+- [x] End-to-end connectivity test script created and validated
+- [x] Complete infrastructure support for frontend, API, and worker services
+- [x] Docker containerization for all services with proper optimization
+- [x] Environment variable configuration for service communication
+
+#### Key Files Created/Modified
+- `api/Dockerfile` - Production-ready containerization for FastAPI service
+- `frontend/Dockerfile` - Multi-stage build for optimized Next.js deployment
+- `frontend/next.config.mjs` - Standalone output configuration for containerization
+- `frontend/components/chat/chat-interface.tsx` - Updated to use real API endpoints
+- `infra/terraform/apprunner.tf` - Added frontend App Runner service configuration
+- `infra/terraform/ecr.tf` - Added frontend ECR repository and lifecycle policies
+- `infra/terraform/variables.tf` - Added frontend_image variable
+- `infra/terraform/outputs.tf` - Added frontend service URL output
+- `1-deploy-infrastructure.sh` - Updated to include frontend ECR repository
+- `2-build-and-push.sh` - Added frontend Docker build and push
+- `3-deploy-app-runner.sh` - Updated to deploy frontend service
+- `test-e2e-playwright.sh` - **NEW**: Playwright E2E testing script as specified in Issue #5
+- `frontend/playwright.config.ts` - **NEW**: Playwright configuration for browser testing
+- `frontend/e2e/chat-flow.spec.ts` - **NEW**: Comprehensive E2E test suite
+- `test-e2e.sh` - Basic curl-based testing script for service connectivity
+- `frontend/jest.setup.js` - Added fetch mock for Node.js test environment
+- `CLAUDE.md` - Updated with E2E testing commands
+- `deployment_guide.md` - **Updated**: Added Playwright E2E testing documentation
+
+#### Playwright E2E Testing Implementation
+**Issue #5 Requirement**: "*E2E test using Playwright that opens the deployed URL, sends a message, and asserts that a response appears*"
+
+**Implementation Details**:
+- **Complete Test Suite**: 4 comprehensive test scenarios covering the full user journey
+- **Real Browser Testing**: Tests against actual deployed frontend and backend services
+- **Multi-browser Support**: Configured for Chromium, Firefox, and WebKit
+- **Responsive Testing**: Validates UI across mobile and desktop viewports
+- **Accessibility Testing**: Verifies keyboard navigation and screen reader compatibility
+- **Error Handling**: Tests graceful degradation when API calls fail
+- **Production Testing**: Script validates deployed services before running tests
+
+**Test Scenarios**:
+1. **End-to-end Chat Flow**: User types message → sends → receives response from backend
+2. **API Error Handling**: Simulates API failures and validates error messaging
+3. **UI Responsiveness**: Tests functionality across different screen sizes
+4. **Keyboard Navigation**: Validates accessibility and keyboard interactions
+
+#### Challenges Encountered
+1. **Next.js Containerization**: Required standalone output configuration for proper Docker deployment
+2. **API Environment Variables**: Frontend needed dynamic API URL configuration for production
+3. **Test Environment Setup**: Node.js test environment lacked fetch API, requiring polyfill
+4. **Terraform Dependencies**: Frontend service needed API service URL for environment configuration
+5. **Docker Build Context**: Multi-stage builds required careful file copying for frontend assets
+
+#### Solutions Implemented
+1. **Standalone Next.js Build**: Configured `output: 'standalone'` in next.config.mjs for container-friendly deployment
+2. **Dynamic API Configuration**: Used `NEXT_PUBLIC_API_BASE_URL` environment variable with Terraform-generated API URL
+3. **Test Fetch Mock**: Added global fetch mock in Jest setup to support API calls in tests
+4. **Service Communication**: Configured frontend App Runner service to receive API URL via environment variables
+5. **Optimized Docker Images**: Implemented multi-stage builds for both API and frontend services
+
+#### Infrastructure Components Added
+- **Frontend ECR Repository**: Secure container registry for frontend images
+- **Frontend App Runner Service**: Managed deployment with automatic scaling
+- **Service Environment Variables**: Dynamic configuration linking frontend to API
+- **Health Check Integration**: Complete service monitoring and validation
+
+#### Testing Results
+- ✅ All Python backend tests pass (2/2)
+- ✅ All frontend tests pass (15/15) with API integration
+- ✅ Pre-commit hooks pass with proper code formatting
+- ✅ Playwright E2E tests validate complete user workflows
+- ✅ Basic curl-based E2E test script validates service connectivity
+- ✅ Frontend successfully calls API endpoints
+- ✅ Complete deployment pipeline functional  
 
 ---
 

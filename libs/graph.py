@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 class ChatMessage(TypedDict):
     """Simplified message format for API serialization."""
+
     role: Literal["user", "assistant", "system", "tool"]
     content: str
 
@@ -17,10 +18,10 @@ def call_llm(state: MessagesState) -> MessagesState:
     """
     Thin-slice node: returns a deterministic assistant reply without
     calling external providers (offline-friendly for CI).
-    
+
     Args:
         state: The current graph state containing messages
-        
+
     Returns:
         Updated state with new assistant message
     """
@@ -44,21 +45,20 @@ def call_llm(state: MessagesState) -> MessagesState:
 def build_thin_graph() -> Pregel:
     """
     Build and compile the minimal deterministic LangGraph graph.
-    
+
     This creates a simple linear graph with a single node that processes
     user messages and returns deterministic responses for testing.
-    
+
     Returns:
         Compiled StateGraph ready for execution
     """
     graph = StateGraph(MessagesState)
-    
+
     # Add the single processing node
     graph.add_node("call_llm", call_llm)
-    
+
     # Define the execution flow: START -> call_llm -> END
     graph.add_edge(START, "call_llm")
     graph.add_edge("call_llm", END)
-    
-    return graph.compile()
 
+    return graph.compile()

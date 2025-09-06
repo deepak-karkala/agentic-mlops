@@ -27,6 +27,12 @@ variable "worker_image" {
   default     = ""
 }
 
+variable "frontend_image" {
+  description = "ECR image identifier for frontend service"
+  type        = string
+  default     = ""
+}
+
 variable "db_username" {
   description = "Username for RDS Postgres"
   type        = string
