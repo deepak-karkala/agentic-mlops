@@ -48,11 +48,10 @@ resource "aws_apprunner_service" "api" {
       image_configuration {
         port = "8000"
         runtime_environment_variables = {
-          DATABASE_URL    = "postgresql://postgres:${var.db_password}@${aws_db_proxy.postgres.endpoint}:5432/postgres"
-          S3_BUCKET_NAME  = aws_s3_bucket.artifacts.bucket
-          AWS_REGION      = var.region
-          ENVIRONMENT     = "production"
-          FRONTEND_ORIGIN = length(aws_apprunner_service.frontend) > 0 ? "https://${aws_apprunner_service.frontend[0].service_url}" : ""
+          DATABASE_URL   = "postgresql://postgres:${var.db_password}@${aws_db_proxy.postgres.endpoint}:5432/postgres"
+          S3_BUCKET_NAME = aws_s3_bucket.artifacts.bucket
+          AWS_REGION     = var.region
+          ENVIRONMENT    = "production"
         }
       }
     }

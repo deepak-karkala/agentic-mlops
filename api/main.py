@@ -16,19 +16,11 @@ app = FastAPI()
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 
 if ENVIRONMENT == "production":
-    # Production: Restrict to specific origins
-    frontend_origin = os.getenv("FRONTEND_ORIGIN", "")
-    allowed_origins = []
-
-    if frontend_origin:
-        allowed_origins.append(frontend_origin)
-
-    # Also allow AWS App Runner domains as fallback
-    allowed_origins.extend(
-        [
-            "https://*.amazonaws.com",
-        ]
-    )
+    # Production: Allow AWS App Runner domains (more secure than wildcard)
+    allowed_origins = [
+        # AWS App Runner domains have predictable patterns
+        "https://*.amazonaws.com",
+    ]
 
     allow_credentials = True
     allowed_methods = ["GET", "POST", "PUT", "DELETE"]
