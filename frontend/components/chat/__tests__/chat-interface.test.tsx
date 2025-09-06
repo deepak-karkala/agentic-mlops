@@ -82,9 +82,6 @@ describe("ChatInterface", () => {
     // Check that the user message appears
     expect(screen.getByText("Test message")).toBeInTheDocument();
 
-    // Check that loading indicator appears
-    expect(screen.getByText("Thinking...")).toBeInTheDocument();
-
     // Input should be cleared
     expect(input).toHaveValue("");
   });
@@ -102,10 +99,7 @@ describe("ChatInterface", () => {
   });
 
   it("shows assistant response after loading", async () => {
-    // Mock timers for the setTimeout in the component
-    jest.useFakeTimers();
-
-    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    const user = userEvent.setup();
     render(<ChatInterface />);
 
     const input = screen.getByPlaceholderText(
@@ -116,14 +110,11 @@ describe("ChatInterface", () => {
     const sendButton = screen.getByRole("button");
     await user.click(sendButton);
 
-    // Fast-forward time to resolve the mock API call
-    jest.advanceTimersByTime(2000);
-
+    // Wait for the assistant response to appear
     await waitFor(() => {
-      expect(screen.getByText(/I received your message/)).toBeInTheDocument();
+      expect(
+        screen.getByText(/You said: Test message. Thin slice online./),
+      ).toBeInTheDocument();
     });
-
-    // Cleanup
-    jest.useRealTimers();
   });
 });

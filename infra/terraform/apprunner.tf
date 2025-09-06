@@ -48,9 +48,11 @@ resource "aws_apprunner_service" "api" {
       image_configuration {
         port = "8000"
         runtime_environment_variables = {
-          DATABASE_URL   = "postgresql://postgres:${var.db_password}@${aws_db_proxy.postgres.endpoint}:5432/postgres"
-          S3_BUCKET_NAME = aws_s3_bucket.artifacts.bucket
-          AWS_REGION     = var.region
+          DATABASE_URL    = "postgresql://postgres:${var.db_password}@${aws_db_proxy.postgres.endpoint}:5432/postgres"
+          S3_BUCKET_NAME  = aws_s3_bucket.artifacts.bucket
+          AWS_REGION      = var.region
+          ENVIRONMENT     = "production"
+          FRONTEND_ORIGIN = length(aws_apprunner_service.frontend) > 0 ? "https://${aws_apprunner_service.frontend[0].service_url}" : ""
         }
       }
     }
@@ -102,4 +104,31 @@ resource "aws_apprunner_service" "worker" {
       vpc_connector_arn = aws_apprunner_vpc_connector.main.arn
     }
   }
+}
+
+resource "aws_apprunner_service" "frontend" {
+  count = var.frontend_image != "" ? 1 : 0
+
+  service_name = "${var.project}-frontend"
+
+  source_configuration {
+    image_repository {
+      image_identifier      = var.frontend_image
+      image_repository_type = "ECR"
+      image_configuration {
+        port = "3000"
+        runtime_environment_variables = {
+          NEXT_PUBLIC_API_BASE_URL = length(aws_apprunner_service.api) > 0 ? "https://${aws_apprunner_service.api[0].service_url}" : ""
+        }
+      }
+    }
+    auto_deployments_enabled = false
+  }
+
+  instance_configuration {
+    cpu    = "512"
+    memory = "1024"
+  }
+
+  # Frontend doesn't need VPC access for database
 }

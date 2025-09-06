@@ -1,14 +1,57 @@
 from __future__ import annotations
 
+import os
 from typing import List, Literal
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
 
 from libs.graph import build_thin_graph
 
 app = FastAPI()
+
+# CORS configuration based on environment
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+
+if ENVIRONMENT == "production":
+    # Production: Restrict to specific origins
+    frontend_origin = os.getenv("FRONTEND_ORIGIN", "")
+    allowed_origins = []
+
+    if frontend_origin:
+        allowed_origins.append(frontend_origin)
+
+    # Also allow AWS App Runner domains as fallback
+    allowed_origins.extend(
+        [
+            "https://*.amazonaws.com",
+        ]
+    )
+
+    allow_credentials = True
+    allowed_methods = ["GET", "POST", "PUT", "DELETE"]
+    allowed_headers = ["Content-Type", "Authorization"]
+else:
+    # Development: Allow localhost and common dev ports
+    allowed_origins = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+    ]
+    allow_credentials = True
+    allowed_methods = ["*"]
+    allowed_headers = ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=allow_credentials,
+    allow_methods=allowed_methods,
+    allow_headers=allowed_headers,
+)
 
 
 @app.get("/")

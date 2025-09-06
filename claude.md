@@ -23,6 +23,7 @@ npm test                           # Frontend tests
 ./1-deploy-infrastructure.sh       # AWS infrastructure
 ./2-build-and-push.sh              # Build and push containers
 ./3-deploy-app-runner.sh           # Deploy applications
+./test-e2e.sh                      # End-to-end testing
 ```
 
 ## Project Structure

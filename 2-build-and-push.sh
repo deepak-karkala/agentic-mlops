@@ -87,10 +87,12 @@ echo "🔍 Getting ECR repository URLs..."
 cd infra/terraform
 API_REPO=$(terraform output -raw api_ecr_repository_url)
 WORKER_REPO=$(terraform output -raw worker_ecr_repository_url)
+FRONTEND_REPO=$(terraform output -raw frontend_ecr_repository_url)
 cd ../..
 
 echo "📍 API Repository: $API_REPO"
 echo "📍 Worker Repository: $WORKER_REPO"
+echo "📍 Frontend Repository: $FRONTEND_REPO"
 
 # Login to ECR
 echo "🔑 Logging into ECR..."
@@ -104,6 +106,10 @@ docker build -f api/Dockerfile -t $API_REPO:latest .
 echo "🔨 Building Worker image..."
 docker build -f worker/Dockerfile -t $WORKER_REPO:latest .
 
+# Build Frontend image
+echo "🔨 Building Frontend image..."
+docker build -f frontend/Dockerfile -t $FRONTEND_REPO:latest .
+
 # Push images
 echo "📤 Pushing API image..."
 docker push $API_REPO:latest
@@ -111,11 +117,15 @@ docker push $API_REPO:latest
 echo "📤 Pushing Worker image..."
 docker push $WORKER_REPO:latest
 
+echo "📤 Pushing Frontend image..."
+docker push $FRONTEND_REPO:latest
+
 # Save image URIs for next phase
 echo "💾 Saving image URIs..."
 cat >> deployment-config.env << EOF
 API_IMAGE="$API_REPO:latest"
 WORKER_IMAGE="$WORKER_REPO:latest"
+FRONTEND_IMAGE="$FRONTEND_REPO:latest"
 EOF
 
 echo "✅ Docker images built and pushed successfully!"
