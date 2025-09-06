@@ -4,12 +4,16 @@ import os
 import uuid
 from typing import List, Literal, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
+from sqlalchemy.orm import Session
 
 from libs.graph import build_thin_graph
+from libs.job_service import JobService, create_decision_set_for_thread
+from libs.database import create_database_engine, create_session_maker
+from libs.models import JobStatus, Job
 
 app = FastAPI()
 
@@ -68,7 +72,34 @@ class ChatResponse(BaseModel):
     thread_id: str  # Always return thread_id for client tracking
 
 
+class AsyncChatResponse(BaseModel):
+    decision_set_id: str  # ID for tracking the conversation
+    thread_id: str  # LangGraph thread_id for state persistence
+    job_id: str  # ID for tracking job status
+    status: str  # Current job status
+
+
+class JobStatusResponse(BaseModel):
+    job_id: str
+    status: JobStatus
+    decision_set_id: str
+    thread_id: str
+
+
 _graph = build_thin_graph()
+
+# Database setup
+engine = create_database_engine()
+SessionMaker = create_session_maker(engine)
+
+
+def get_db() -> Session:
+    """Dependency to get database session."""
+    db = SessionMaker()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 def _convert_to_langchain_message(chat_msg: ChatMessage):
@@ -104,11 +135,10 @@ def _convert_from_langchain_message(lc_msg) -> ChatMessage:
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(req: ChatRequest) -> ChatResponse:
     """
-    Invoke the thin-slice LangGraph with provided messages and thread_id.
+    Synchronous chat endpoint for backward compatibility.
 
-    This endpoint now supports durable state through thread_id. If no thread_id
-    is provided, a new one is generated. The graph state is persisted between
-    calls using the same thread_id.
+    This endpoint processes messages immediately and returns results.
+    For production use, prefer the async endpoint /api/chat/async
     """
     # Generate thread_id if not provided
     thread_id = req.thread_id or str(uuid.uuid4())
@@ -128,3 +158,69 @@ def chat(req: ChatRequest) -> ChatResponse:
     converted_messages = [_convert_from_langchain_message(m) for m in all_messages]
 
     return ChatResponse(messages=converted_messages, thread_id=thread_id)
+
+
+@app.post("/api/chat/async", response_model=AsyncChatResponse)
+def chat_async(req: ChatRequest, db: Session = Depends(get_db)) -> AsyncChatResponse:
+    """
+    Asynchronous chat endpoint that enqueues jobs for worker processing.
+
+    This is the preferred endpoint for production as it:
+    - Returns immediately with job tracking information
+    - Allows the API to remain responsive under load
+    - Enables distributed processing via workers
+    """
+    # Generate thread_id if not provided
+    thread_id = req.thread_id or str(uuid.uuid4())
+
+    # Extract user prompt from the last user message
+    user_prompt = "Default chat request"
+    for msg in reversed(req.messages):
+        if msg.role == "user":
+            user_prompt = msg.content
+            break
+
+    try:
+        # Create decision set for this conversation
+        decision_set = create_decision_set_for_thread(db, thread_id, user_prompt)
+
+        # Create job service and enqueue the job
+        job_service = JobService(db)
+        job = job_service.create_job(
+            decision_set_id=decision_set.id,
+            job_type="ml_workflow",
+            payload={
+                "thread_id": thread_id,
+                "messages": [msg.model_dump() for msg in req.messages],
+            },
+        )
+
+        return AsyncChatResponse(
+            decision_set_id=decision_set.id,
+            thread_id=thread_id,
+            job_id=job.id,
+            status=job.status.value,
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create job: {str(e)}")
+
+
+@app.get("/api/jobs/{job_id}/status", response_model=JobStatusResponse)
+def get_job_status(job_id: str, db: Session = Depends(get_db)) -> JobStatusResponse:
+    """
+    Get the current status of a job.
+
+    Use this endpoint to poll for job completion after using /api/chat/async
+    """
+    # Get the job
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    return JobStatusResponse(
+        job_id=job.id,
+        status=job.status,
+        decision_set_id=job.decision_set_id,
+        thread_id=job.decision_set.thread_id,
+    )
