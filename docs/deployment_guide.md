@@ -33,7 +33,7 @@ Enter your AWS Access Key ID, Secret Access Key, region (`us-east-1`), and outpu
 ### Step 2: Deploy Infrastructure Foundation
 
 ```bash
-./1-deploy-infrastructure.sh
+./scripts/1-deploy-infrastructure.sh
 ```
 
 **What this does:**
@@ -51,7 +51,7 @@ Enter your AWS Access Key ID, Secret Access Key, region (`us-east-1`), and outpu
 ### Step 3: Build and Push Container Images
 
 ```bash
-./2-build-and-push.sh
+./scripts/2-build-and-push.sh
 ```
 
 **What this does:**
@@ -65,7 +65,7 @@ Enter your AWS Access Key ID, Secret Access Key, region (`us-east-1`), and outpu
 ### Step 4: Deploy App Runner Services
 
 ```bash
-./3-deploy-app-runner.sh
+./scripts/3-deploy-app-runner.sh
 ```
 
 **What this does:**
@@ -154,7 +154,7 @@ You can run E2E tests using either approach:
 
 #### Option A: Playwright E2E Tests (Recommended)
 ```bash
-./test-e2e-playwright.sh
+./scripts/test-e2e-playwright.sh
 ```
 
 **What this tests:**
@@ -167,7 +167,7 @@ You can run E2E tests using either approach:
 
 #### Option B: Basic curl-based Tests
 ```bash
-./test-e2e.sh
+./scripts/test-e2e.sh
 ```
 
 **What this tests:**
@@ -267,4 +267,4 @@ terraform destroy
 - Check CloudWatch logs for detailed error information
 - Use AWS Support for infrastructure issues
 - Review Terraform state for configuration debugging
-- Run `./test-e2e.sh` to validate service connectivity
+- Run `./scripts/test-e2e.sh` to validate service connectivity
