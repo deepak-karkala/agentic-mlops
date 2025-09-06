@@ -22,6 +22,7 @@ dependencies = [
 dev = [
     "pre-commit",
     "pytest",
+    "pytest-asyncio",
     "ruff",
     "httpx",
 ]
@@ -32,3 +33,6 @@ target-version = "py311"
 
 [tool.pytest.ini_options]
 addopts = "-q"
+markers = [
+    "integration: marks tests as integration tests",
+]
