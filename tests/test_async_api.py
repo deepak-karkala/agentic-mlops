@@ -137,17 +137,25 @@ class TestAsyncAPI:
 
     def test_job_status_endpoint_not_found(self):
         """Test job status endpoint when job doesn't exist."""
-        with patch("api.main.get_db") as mock_get_db:
-            mock_session = MagicMock()
-            mock_session.query.return_value.filter.return_value.first.return_value = (
-                None
-            )
-            mock_get_db.return_value.__enter__.return_value = mock_session
+        from api.main import get_db
 
+        # Mock the database session properly using FastAPI's dependency override
+        mock_session = MagicMock()
+        mock_session.query.return_value.filter.return_value.first.return_value = None
+
+        def mock_get_db():
+            return mock_session
+
+        # Override the dependency
+        app.dependency_overrides[get_db] = mock_get_db
+
+        try:
             response = client.get("/api/jobs/nonexistent-job/status")
-
             assert response.status_code == 404
             assert "Job not found" in response.json()["detail"]
+        finally:
+            # Clean up the override
+            app.dependency_overrides.clear()
 
 
 if __name__ == "__main__":
