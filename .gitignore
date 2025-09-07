@@ -226,5 +226,5 @@ deployment-config.env
 
 # Local database files
 test.db
-test.db.checkpoints
+test.db.checkpoints*
 *.db.checkpoints
