@@ -161,7 +161,9 @@ Provide a complete ConstraintExtractionResult with your analysis.
 """
 
     async def extract_state_updates(
-        self, llm_response: ConstraintExtractionResult, current_state: MLOpsWorkflowState
+        self,
+        llm_response: ConstraintExtractionResult,
+        current_state: MLOpsWorkflowState,
     ) -> Dict[str, Any]:
         """
         Extract state updates from the constraint extraction result.

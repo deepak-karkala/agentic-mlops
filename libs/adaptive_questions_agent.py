@@ -326,8 +326,9 @@ Focus on practical completeness that enables confident architecture recommendati
         """
         questioning_history = state.get("questioning_history", [])
         # Try to get coverage from analysis first, then fall back to direct coverage_score
-        current_coverage = state.get("coverage_analysis", {}).get("score", 
-                                     state.get("coverage_score", 0.0))
+        current_coverage = state.get("coverage_analysis", {}).get(
+            "score", state.get("coverage_score", 0.0)
+        )
         questioning_complete = state.get("questioning_complete", False)
 
         # Check termination conditions

@@ -661,7 +661,9 @@ class TestCompleteWorkflowTransformation:
         """Test batch analytics workflow focusing on cost optimization."""
         mock_responses = [
             self.create_mock_extraction_result("batch_analytics"),
-            self.create_mock_planner_result("batch_analytics"),  # Only IntakeExtract and Planner are executed
+            self.create_mock_planner_result(
+                "batch_analytics"
+            ),  # Only IntakeExtract and Planner are executed
         ]
 
         mock_client = Mock()
@@ -777,32 +779,44 @@ class TestCompleteWorkflowTransformation:
             ],
             "reason_cards": [
                 {
-                    "agent": "intake_extract", 
+                    "agent": "intake_extract",
                     "confidence": 0.89,
-                    "choice": {"id": "constraint_extraction", "justification": "Successfully extracted constraints"},
+                    "choice": {
+                        "id": "constraint_extraction",
+                        "justification": "Successfully extracted constraints",
+                    },
                     "decision_id": "decision_001",
-                    "outputs": {"extraction_confidence": 0.89}
+                    "outputs": {"extraction_confidence": 0.89},
                 },
                 {
-                    "agent": "coverage_check", 
+                    "agent": "coverage_check",
                     "confidence": 0.90,
-                    "choice": {"id": "coverage_analysis", "justification": "Coverage threshold met"},
-                    "decision_id": "decision_002", 
-                    "outputs": {"coverage_score": 0.85}
+                    "choice": {
+                        "id": "coverage_analysis",
+                        "justification": "Coverage threshold met",
+                    },
+                    "decision_id": "decision_002",
+                    "outputs": {"coverage_score": 0.85},
                 },
                 {
-                    "agent": "planner", 
+                    "agent": "planner",
                     "confidence": 0.91,
-                    "choice": {"id": "realtime_inference_enterprise", "justification": "Best fit for fraud detection requirements"},
+                    "choice": {
+                        "id": "realtime_inference_enterprise",
+                        "justification": "Best fit for fraud detection requirements",
+                    },
                     "decision_id": "decision_003",
-                    "outputs": {"pattern_selected": "realtime_inference_enterprise"}
+                    "outputs": {"pattern_selected": "realtime_inference_enterprise"},
                 },
                 {
-                    "agent": "critic_tech", 
+                    "agent": "critic_tech",
                     "confidence": 0.82,
-                    "choice": {"id": "technical_feasibility", "justification": "Feasible with security considerations"},
+                    "choice": {
+                        "id": "technical_feasibility",
+                        "justification": "Feasible with security considerations",
+                    },
                     "decision_id": "decision_004",
-                    "outputs": {"feasibility_score": 0.78}
+                    "outputs": {"feasibility_score": 0.78},
                 },
             ],
             "agent_outputs": {
@@ -827,8 +841,9 @@ class TestCompleteWorkflowTransformation:
         assert len(decisions) == 4
         assert all(d["confidence"] > 0.75 for d in decisions)
 
-        # Test agent-specific context  
+        # Test agent-specific context
         from libs.agent_framework import AgentType
+
         cost_context = context.get_agent_specific_context(AgentType.CRITIC_COST)
         assert "plan" in cost_context
         assert "tech_analysis" in cost_context
@@ -858,7 +873,10 @@ class TestCompleteWorkflowTransformation:
 
             # Verify error handling
             assert not result.success
-            assert "failed" in result.error_message.lower() or "unavailable" in result.error_message.lower()
+            assert (
+                "failed" in result.error_message.lower()
+                or "unavailable" in result.error_message.lower()
+            )
             assert result.reason_card is not None
             assert len(result.reason_card.risks) > 0
 

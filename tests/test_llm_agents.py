@@ -451,7 +451,7 @@ class TestLLMPlannerAgent:
         assert "containerized" in pattern_summary.lower()
         assert "kubernetes" in pattern_summary.lower()
         assert "batch" in pattern_summary.lower()
-        
+
         # Verify it provides meaningful architectural guidance
         assert len(pattern_summary) > 100  # Should be substantial description
 
@@ -539,11 +539,6 @@ class TestIntegrationWorkflow:
                 "adaptive_questions",
                 "planner",
             ],
-            "reason_cards": [
-                {"agent": "intake_extract", "confidence": 0.85},
-                {"agent": "coverage_check", "confidence": 0.9},
-                {"agent": "planner", "confidence": 0.87},
-            ],
             "agent_outputs": {
                 "intake_extract": {"extraction_confidence": 0.85},
                 "coverage_check": {"coverage_score": 0.8},
@@ -556,11 +551,11 @@ class TestIntegrationWorkflow:
                     "choice": {
                         "id": "realtime_inference_enterprise",
                         "justification": "Selected enterprise-grade real-time inference pattern for fraud detection",
-                        "confidence": 0.85
+                        "confidence": 0.85,
                     },
                     "confidence": 0.85,
                     "outputs": {"selected_pattern_id": "realtime_inference_enterprise"},
-                    "timestamp": "2024-01-01T12:00:00Z"
+                    "timestamp": "2024-01-01T12:00:00Z",
                 },
                 {
                     "agent": "tech_critic",
@@ -568,12 +563,12 @@ class TestIntegrationWorkflow:
                     "choice": {
                         "id": "approved_with_recommendations",
                         "justification": "Architecture is feasible with some performance considerations",
-                        "confidence": 0.8
+                        "confidence": 0.8,
                     },
                     "confidence": 0.8,
                     "outputs": {"feasibility_score": 0.8},
-                    "timestamp": "2024-01-01T12:05:00Z"
-                }
+                    "timestamp": "2024-01-01T12:05:00Z",
+                },
             ],
         }
 

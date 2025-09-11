@@ -11,8 +11,18 @@ from unittest.mock import patch, Mock, AsyncMock
 from langchain_core.messages import HumanMessage
 
 from libs.graph import build_full_graph, MLOpsWorkflowState
-from libs.constraint_schema import MLOpsConstraints, ConstraintExtractionResult, CoverageAnalysisResult, AdaptiveQuestioningResult
-from libs.agent_output_schemas import PlannerOutput, TechCriticOutput, CostCriticOutput, PolicyEngineOutput
+from libs.constraint_schema import (
+    MLOpsConstraints,
+    ConstraintExtractionResult,
+    CoverageAnalysisResult,
+    AdaptiveQuestioningResult,
+)
+from libs.agent_output_schemas import (
+    PlannerOutput,
+    TechCriticOutput,
+    CostCriticOutput,
+    PolicyEngineOutput,
+)
 
 
 class TestFullMLOpsGraph:
@@ -21,11 +31,13 @@ class TestFullMLOpsGraph:
     @pytest.fixture(scope="function")
     def mock_llm_client(self):
         """Mock LLM client for all tests to avoid API key requirements."""
-        with patch('libs.llm_client.OpenAIClient') as mock_client_class, \
-             patch('libs.llm_client.get_llm_client') as mock_get_client:
+        with (
+            patch("libs.llm_client.OpenAIClient") as mock_client_class,
+            patch("libs.llm_client.get_llm_client") as mock_get_client,
+        ):
             # Create mock client
             mock_client = Mock()
-            
+
             # Mock different responses for different agent types
             def mock_complete_side_effect(messages, response_format=None, **kwargs):
                 if response_format == ConstraintExtractionResult:
@@ -36,12 +48,12 @@ class TestFullMLOpsGraph:
                             deployment_pref="serverless",
                             workload_types=["online_inference"],
                             expected_throughput="low",
-                            data_classification="internal"
+                            data_classification="internal",
                         ),
                         extraction_confidence=0.85,
                         uncertain_fields=["availability_target"],
                         extraction_rationale="Clear requirements provided",
-                        follow_up_needed=False
+                        follow_up_needed=False,
                     )
                 elif response_format == CoverageAnalysisResult:
                     return CoverageAnalysisResult(
@@ -53,13 +65,16 @@ class TestFullMLOpsGraph:
                             "budget_band": {"present": True, "confidence": 0.9},
                             "deployment_pref": {"present": True, "confidence": 0.85},
                             "workload_types": {"present": True, "confidence": 0.8},
-                            "availability_target": {"present": False, "confidence": 0.0}
+                            "availability_target": {
+                                "present": False,
+                                "confidence": 0.0,
+                            },
                         },
                         improvement_recommendations=[
                             "Specify availability requirements",
-                            "Clarify team expertise level"
+                            "Clarify team expertise level",
                         ],
-                        analysis_confidence=0.8
+                        analysis_confidence=0.8,
                     )
                 elif response_format == AdaptiveQuestioningResult:
                     return AdaptiveQuestioningResult(
@@ -68,7 +83,7 @@ class TestFullMLOpsGraph:
                         questioning_rationale="Sufficient information gathered",
                         priority_gaps_addressed=["availability_target"],
                         additional_context_needed=False,
-                        confidence=0.85
+                        confidence=0.85,
                     )
                 elif response_format == PlannerOutput:
                     return PlannerOutput(
@@ -77,25 +92,56 @@ class TestFullMLOpsGraph:
                         selection_rationale="Matches budget and deployment preferences",
                         selection_confidence=0.8,
                         alternatives_considered=[
-                            {"pattern_id": "container_basic", "reason_not_selected": "Higher operational complexity"},
-                            {"pattern_id": "managed_endpoint", "reason_not_selected": "Higher cost"}
+                            {
+                                "pattern_id": "container_basic",
+                                "reason_not_selected": "Higher operational complexity",
+                            },
+                            {
+                                "pattern_id": "managed_endpoint",
+                                "reason_not_selected": "Higher cost",
+                            },
                         ],
                         pattern_comparison="Serverless chosen for cost efficiency and simplicity",
                         architecture_overview="Event-driven serverless architecture",
                         key_services={
                             "lambda": "Serverless compute for inference",
-                            "sagemaker": "Model hosting and management", 
+                            "sagemaker": "Model hosting and management",
                             "s3": "Model and data storage",
-                            "apigateway": "API endpoint management"
+                            "apigateway": "API endpoint management",
                         },
                         estimated_monthly_cost=350.0,
                         deployment_approach="Infrastructure as Code with CDK",
-                        implementation_phases=["Setup core services", "Deploy model", "Add monitoring", "Performance tuning"],
-                        critical_success_factors=["Model optimization", "Cold start mitigation", "Proper monitoring"],
-                        potential_challenges=["Cold start latency", "Lambda timeout limits", "Concurrent execution limits"],
-                        success_metrics=["Response time < 200ms", "99.5% availability", "Cost under $400/month"],
-                        assumptions_made=["Model size < 10GB", "Peak concurrency < 1000", "US-East-1 region"],
-                        decision_criteria=["Budget compliance", "Operational simplicity", "Auto-scaling capability"]
+                        implementation_phases=[
+                            "Setup core services",
+                            "Deploy model",
+                            "Add monitoring",
+                            "Performance tuning",
+                        ],
+                        critical_success_factors=[
+                            "Model optimization",
+                            "Cold start mitigation",
+                            "Proper monitoring",
+                        ],
+                        potential_challenges=[
+                            "Cold start latency",
+                            "Lambda timeout limits",
+                            "Concurrent execution limits",
+                        ],
+                        success_metrics=[
+                            "Response time < 200ms",
+                            "99.5% availability",
+                            "Cost under $400/month",
+                        ],
+                        assumptions_made=[
+                            "Model size < 10GB",
+                            "Peak concurrency < 1000",
+                            "US-East-1 region",
+                        ],
+                        decision_criteria=[
+                            "Budget compliance",
+                            "Operational simplicity",
+                            "Auto-scaling capability",
+                        ],
                     )
                 elif response_format == TechCriticOutput:
                     return TechCriticOutput(
@@ -106,23 +152,59 @@ class TestFullMLOpsGraph:
                         architecture_concerns=["API Gateway single point of failure"],
                         scalability_risks=["Concurrent execution limits"],
                         security_concerns=["IAM permissions management"],
-                        performance_bottlenecks=["Lambda cold starts", "SageMaker model loading"],
-                        capacity_constraints=["Lambda concurrency", "SageMaker endpoint capacity"],
-                        integration_challenges=["Model versioning", "A/B testing setup"],
-                        single_points_of_failure=["API Gateway", "Single AZ deployment"],
-                        failure_domains=["Lambda region", "SageMaker availability zone"],
-                        disaster_recovery_gaps=["No multi-region setup", "Limited backup strategy"],
-                        risk_mitigation_strategies=["Implement Lambda warming", "Add health checks"],
-                        architecture_improvements=["Add load balancing", "Implement caching"],
-                        monitoring_requirements=["CloudWatch metrics", "Custom dashboards"],
+                        performance_bottlenecks=[
+                            "Lambda cold starts",
+                            "SageMaker model loading",
+                        ],
+                        capacity_constraints=[
+                            "Lambda concurrency",
+                            "SageMaker endpoint capacity",
+                        ],
+                        integration_challenges=[
+                            "Model versioning",
+                            "A/B testing setup",
+                        ],
+                        single_points_of_failure=[
+                            "API Gateway",
+                            "Single AZ deployment",
+                        ],
+                        failure_domains=[
+                            "Lambda region",
+                            "SageMaker availability zone",
+                        ],
+                        disaster_recovery_gaps=[
+                            "No multi-region setup",
+                            "Limited backup strategy",
+                        ],
+                        risk_mitigation_strategies=[
+                            "Implement Lambda warming",
+                            "Add health checks",
+                        ],
+                        architecture_improvements=[
+                            "Add load balancing",
+                            "Implement caching",
+                        ],
+                        monitoring_requirements=[
+                            "CloudWatch metrics",
+                            "Custom dashboards",
+                        ],
                         operational_complexity="Low to medium complexity",
-                        maintenance_requirements=["Model retraining", "Lambda function updates"],
+                        maintenance_requirements=[
+                            "Model retraining",
+                            "Lambda function updates",
+                        ],
                         skill_requirements=["AWS Lambda", "Python", "MLOps basics"],
                         availability_impact="Medium",
                         performance_impact="Low",
                         security_impact="Medium",
-                        analysis_assumptions=["Model size < 10GB", "Peak load < 1000 concurrent"],
-                        analysis_limitations=["No load testing performed", "Security review needed"]
+                        analysis_assumptions=[
+                            "Model size < 10GB",
+                            "Peak load < 1000 concurrent",
+                        ],
+                        analysis_limitations=[
+                            "No load testing performed",
+                            "Security review needed",
+                        ],
                     )
                 elif response_format == CostCriticOutput:
                     return CostCriticOutput(
@@ -130,50 +212,158 @@ class TestFullMLOpsGraph:
                         cost_confidence=0.9,
                         cost_analysis_summary="Cost estimate within startup budget",
                         service_costs=[
-                            {"service": "lambda", "cost": 50.0, "description": "Function execution"},
-                            {"service": "sagemaker", "cost": 150.0, "description": "Model hosting"},
-                            {"service": "s3", "cost": 25.0, "description": "Data storage"},
-                            {"service": "apigateway", "cost": 125.0, "description": "API requests"}
+                            {
+                                "service": "lambda",
+                                "cost": 50.0,
+                                "description": "Function execution",
+                            },
+                            {
+                                "service": "sagemaker",
+                                "cost": 150.0,
+                                "description": "Model hosting",
+                            },
+                            {
+                                "service": "s3",
+                                "cost": 25.0,
+                                "description": "Data storage",
+                            },
+                            {
+                                "service": "apigateway",
+                                "cost": 125.0,
+                                "description": "API requests",
+                            },
                         ],
                         infrastructure_costs=[
-                            {"component": "compute", "cost": 200.0, "details": "Lambda + SageMaker"},
-                            {"component": "storage", "cost": 25.0, "details": "S3 buckets"},
-                            {"component": "networking", "cost": 125.0, "details": "API Gateway"}
+                            {
+                                "component": "compute",
+                                "cost": 200.0,
+                                "details": "Lambda + SageMaker",
+                            },
+                            {
+                                "component": "storage",
+                                "cost": 25.0,
+                                "details": "S3 buckets",
+                            },
+                            {
+                                "component": "networking",
+                                "cost": 125.0,
+                                "details": "API Gateway",
+                            },
                         ],
                         operational_costs=[
-                            {"component": "monitoring", "cost": 15.0, "details": "CloudWatch logs and metrics"},
-                            {"component": "security", "cost": 5.0, "details": "IAM and encryption"}
+                            {
+                                "component": "monitoring",
+                                "cost": 15.0,
+                                "details": "CloudWatch logs and metrics",
+                            },
+                            {
+                                "component": "security",
+                                "cost": 5.0,
+                                "details": "IAM and encryption",
+                            },
                         ],
-                        primary_cost_drivers=["SageMaker hosting", "API Gateway requests", "Lambda executions"],
-                        cost_distribution={"compute": 57.1, "storage": 7.1, "networking": 35.7},
+                        primary_cost_drivers=[
+                            "SageMaker hosting",
+                            "API Gateway requests",
+                            "Lambda executions",
+                        ],
+                        cost_distribution={
+                            "compute": 57.1,
+                            "storage": 7.1,
+                            "networking": 35.7,
+                        },
                         variable_vs_fixed={"variable": 80.0, "fixed": 20.0},
                         budget_compliance_status="pass",
                         budget_utilization=0.875,
                         budget_risk_assessment="Low risk, well within budget constraints",
-                        cost_scaling_factors=["Request volume", "Model inference time", "Data storage growth"],
-                        scaling_cost_projections={"2x_load": 700.0, "5x_load": 1750.0, "10x_load": 3500.0},
+                        cost_scaling_factors=[
+                            "Request volume",
+                            "Model inference time",
+                            "Data storage growth",
+                        ],
+                        scaling_cost_projections={
+                            "2x_load": 700.0,
+                            "5x_load": 1750.0,
+                            "10x_load": 3500.0,
+                        },
                         break_even_analysis="Cost effective for > 1000 requests/month",
-                        cost_optimization_recommendations=["Use reserved capacity", "Optimize model size", "Implement caching"],
+                        cost_optimization_recommendations=[
+                            "Use reserved capacity",
+                            "Optimize model size",
+                            "Implement caching",
+                        ],
                         alternative_architectures=[
-                            {"name": "Container-based", "estimated_cost": 450.0, "pros": ["More control"], "cons": ["Higher complexity"]},
-                            {"name": "Managed endpoints", "estimated_cost": 600.0, "pros": ["Less management"], "cons": ["Higher cost"]}
+                            {
+                                "name": "Container-based",
+                                "estimated_cost": 450.0,
+                                "pros": ["More control"],
+                                "cons": ["Higher complexity"],
+                            },
+                            {
+                                "name": "Managed endpoints",
+                                "estimated_cost": 600.0,
+                                "pros": ["Less management"],
+                                "cons": ["Higher cost"],
+                            },
                         ],
-                        reserved_instance_opportunities=["SageMaker endpoints", "Lambda provisioned concurrency"],
-                        potential_hidden_costs=["Data transfer", "Model training costs", "Development time"],
-                        cost_volatility_factors=["Traffic spikes", "Model complexity changes", "AWS pricing updates"],
-                        billing_complexity_notes=["Multiple services", "Usage-based billing", "Regional variations"],
+                        reserved_instance_opportunities=[
+                            "SageMaker endpoints",
+                            "Lambda provisioned concurrency",
+                        ],
+                        potential_hidden_costs=[
+                            "Data transfer",
+                            "Model training costs",
+                            "Development time",
+                        ],
+                        cost_volatility_factors=[
+                            "Traffic spikes",
+                            "Model complexity changes",
+                            "AWS pricing updates",
+                        ],
+                        billing_complexity_notes=[
+                            "Multiple services",
+                            "Usage-based billing",
+                            "Regional variations",
+                        ],
                         expected_roi_timeline="6-12 months based on business value",
-                        value_propositions=["Automated ML inference", "Scalable architecture", "Cost-effective at scale"],
-                        cost_vs_benefit_analysis="Excellent value for automated ML inference capabilities",
-                        cost_monitoring_strategy=["Daily cost alerts", "Usage dashboards", "Monthly reviews"],
-                        budget_alerts_recommended=[
-                            {"threshold": 300.0, "type": "warning", "action": "Review usage"},
-                            {"threshold": 400.0, "type": "critical", "action": "Immediate investigation"}
+                        value_propositions=[
+                            "Automated ML inference",
+                            "Scalable architecture",
+                            "Cost-effective at scale",
                         ],
-                        cost_governance_needs=["Monthly cost reviews", "Budget approval workflow"],
-                        cost_assumptions=["Standard AWS pricing", "US-East-1 region", "Normal usage patterns"],
+                        cost_vs_benefit_analysis="Excellent value for automated ML inference capabilities",
+                        cost_monitoring_strategy=[
+                            "Daily cost alerts",
+                            "Usage dashboards",
+                            "Monthly reviews",
+                        ],
+                        budget_alerts_recommended=[
+                            {
+                                "threshold": 300.0,
+                                "type": "warning",
+                                "action": "Review usage",
+                            },
+                            {
+                                "threshold": 400.0,
+                                "type": "critical",
+                                "action": "Immediate investigation",
+                            },
+                        ],
+                        cost_governance_needs=[
+                            "Monthly cost reviews",
+                            "Budget approval workflow",
+                        ],
+                        cost_assumptions=[
+                            "Standard AWS pricing",
+                            "US-East-1 region",
+                            "Normal usage patterns",
+                        ],
                         pricing_methodology="AWS calculator + usage projections",
-                        cost_analysis_limitations=["No enterprise discounts", "Usage estimates", "Price volatility"]
+                        cost_analysis_limitations=[
+                            "No enterprise discounts",
+                            "Usage estimates",
+                            "Price volatility",
+                        ],
                     )
                 elif response_format == PolicyEngineOutput:
                     return PolicyEngineOutput(
@@ -181,68 +371,126 @@ class TestFullMLOpsGraph:
                         compliance_score=0.9,
                         policy_assessment_summary="All policies met with minor recommendations",
                         policy_rule_results=[
-                            {"rule": "budget_limit", "status": "pass", "details": "Within budget constraints"},
-                            {"rule": "security_baseline", "status": "pass", "details": "Basic security controls present"},
-                            {"rule": "data_governance", "status": "warn", "details": "Consider data classification"}
+                            {
+                                "rule": "budget_limit",
+                                "status": "pass",
+                                "details": "Within budget constraints",
+                            },
+                            {
+                                "rule": "security_baseline",
+                                "status": "pass",
+                                "details": "Basic security controls present",
+                            },
+                            {
+                                "rule": "data_governance",
+                                "status": "warn",
+                                "details": "Consider data classification",
+                            },
                         ],
                         critical_violations=[],
-                        warnings=["Consider multi-region deployment for higher availability"],
+                        warnings=[
+                            "Consider multi-region deployment for higher availability"
+                        ],
                         security_compliance={
                             "status": "compliant",
                             "score": 0.85,
-                            "gaps": ["Multi-factor authentication", "Data encryption at rest"]
+                            "gaps": [
+                                "Multi-factor authentication",
+                                "Data encryption at rest",
+                            ],
                         },
                         data_governance_compliance={
-                            "status": "compliant", 
+                            "status": "compliant",
                             "score": 0.9,
-                            "gaps": ["Data retention policy", "Data classification"]
+                            "gaps": ["Data retention policy", "Data classification"],
                         },
                         operational_compliance={
                             "status": "compliant",
                             "score": 0.95,
-                            "gaps": ["Disaster recovery testing"]
+                            "gaps": ["Disaster recovery testing"],
                         },
                         financial_compliance={
                             "status": "compliant",
                             "score": 1.0,
-                            "gaps": []
+                            "gaps": [],
                         },
                         regulatory_requirements=[
-                            {"regulation": "SOX", "status": "not_applicable", "reason": "No financial data"},
-                            {"regulation": "GDPR", "status": "needs_review", "reason": "May handle personal data"}
+                            {
+                                "regulation": "SOX",
+                                "status": "not_applicable",
+                                "reason": "No financial data",
+                            },
+                            {
+                                "regulation": "GDPR",
+                                "status": "needs_review",
+                                "reason": "May handle personal data",
+                            },
                         ],
-                        compliance_gaps=["Data classification framework", "Multi-region backup"],
+                        compliance_gaps=[
+                            "Data classification framework",
+                            "Multi-region backup",
+                        ],
                         audit_readiness="needs_work",
                         compliance_risks=["Data loss", "Privacy violations"],
-                        risk_mitigation_requirements=["Implement backup strategy", "Add data governance"],
+                        risk_mitigation_requirements=[
+                            "Implement backup strategy",
+                            "Add data governance",
+                        ],
                         escalation_required=False,
                         immediate_actions_required=["Set up monitoring alerts"],
-                        recommended_policy_adjustments=["Add data classification policy"],
-                        alternative_approaches=[
-                            {"approach": "Enhanced security", "details": "Add encryption and MFA", "impact": "Higher security"}
+                        recommended_policy_adjustments=[
+                            "Add data classification policy"
                         ],
-                        governance_controls_needed=["Cost monitoring", "Access reviews"],
-                        monitoring_requirements=["Compliance dashboards", "Policy violation alerts"],
-                        documentation_requirements=["Security procedures", "Data handling policies"],
-                        stakeholder_notifications=["Security team", "Compliance officer"],
+                        alternative_approaches=[
+                            {
+                                "approach": "Enhanced security",
+                                "details": "Add encryption and MFA",
+                                "impact": "Higher security",
+                            }
+                        ],
+                        governance_controls_needed=[
+                            "Cost monitoring",
+                            "Access reviews",
+                        ],
+                        monitoring_requirements=[
+                            "Compliance dashboards",
+                            "Policy violation alerts",
+                        ],
+                        documentation_requirements=[
+                            "Security procedures",
+                            "Data handling policies",
+                        ],
+                        stakeholder_notifications=[
+                            "Security team",
+                            "Compliance officer",
+                        ],
                         approval_requirements=["Security approval for production"],
                         change_management_needs=["Policy update communication"],
-                        policies_evaluated=["Security baseline", "Budget policy", "Data governance"],
+                        policies_evaluated=[
+                            "Security baseline",
+                            "Budget policy",
+                            "Data governance",
+                        ],
                         policy_exceptions_needed=["Development environment security"],
-                        policy_review_recommendations=["Update data classification policy"],
+                        policy_review_recommendations=[
+                            "Update data classification policy"
+                        ],
                         assessment_confidence=0.8,
-                        assessment_limitations=["Limited security review", "No penetration testing"]
+                        assessment_limitations=[
+                            "Limited security review",
+                            "No penetration testing",
+                        ],
                     )
                 else:
                     # Default text response
                     return "Mock LLM response"
-            
+
             mock_client.complete = AsyncMock(side_effect=mock_complete_side_effect)
-            
+
             # Mock both the class constructor and get_client function
             mock_client_class.return_value = mock_client
             mock_get_client.return_value = mock_client
-            
+
             yield mock_client
 
     def test_full_graph_topology(self, mock_llm_client):
@@ -410,7 +658,15 @@ class TestFullMLOpsGraph:
             assert 0.0 <= card["confidence"] <= 1.0
 
             # Verify agent types are valid
-            expected_agents = ["intake.extract", "coverage.check", "adaptive.questions", "planner", "critic.tech", "critic.cost", "policy.engine"]
+            expected_agents = [
+                "intake.extract",
+                "coverage.check",
+                "adaptive.questions",
+                "planner",
+                "critic.tech",
+                "critic.cost",
+                "policy.engine",
+            ]
             assert card["agent"] in expected_agents
 
             # Should have outputs
@@ -443,7 +699,9 @@ class TestFullMLOpsGraph:
 
         # Verify constraints extraction
         assert constraints["budget_band"].value == "startup"  # Basic extraction
-        assert constraints["deployment_preference"].value == "serverless"  # Default for now
+        assert (
+            constraints["deployment_preference"].value == "serverless"
+        )  # Default for now
 
         # Verify plan structure
         assert "deployment_pattern" in plan
@@ -536,7 +794,7 @@ class TestFullMLOpsGraph:
         rule_names = [rule["rule"] for rule in policy_results["policy_rule_results"]]
         expected_rules = [
             "budget_limit",
-            "security_baseline", 
+            "security_baseline",
             "data_governance",
         ]
 
