@@ -140,7 +140,9 @@ class MLOpsExecutionContext:
                 f"- Feasibility Score: {tech_analysis.get('overall_feasibility_score', 'N/A')}"
             )
             if tech_analysis.get("technical_risks"):
-                parts.append(f"- Key Risks: {', '.join(tech_analysis['technical_risks'][:3])}")
+                parts.append(
+                    f"- Key Risks: {', '.join(tech_analysis['technical_risks'][:3])}"
+                )
 
         # Cost analysis
         cost_analysis = self.get_cost_analysis()
@@ -268,7 +270,9 @@ class BaseLLMAgent(BaseMLOpsAgent):
             # Build rich context from current state
             context = MLOpsExecutionContext(state)
             start = time.time()
-            thread_id = state.get("decision_set_id") or state.get("project_id") or "unknown"
+            thread_id = (
+                state.get("decision_set_id") or state.get("project_id") or "unknown"
+            )
             logger.info(
                 f"Agent start: {self.name}",
                 extra={

@@ -71,7 +71,7 @@ class PolicyStatus(Enum):
 # Consolidated MLOps Workflow State Schema
 class MLOpsWorkflowState(TypedDict, total=False):
     """
-    Comprehensive state schema for MLOps workflows that combines all agent framework 
+    Comprehensive state schema for MLOps workflows that combines all agent framework
     state with LangGraph compatibility. This replaces both the old MLOpsProjectState
     and the previous MLOpsWorkflowState to eliminate duplication.
     """

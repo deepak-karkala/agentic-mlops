@@ -333,8 +333,9 @@ class TestLLMClientIntegration:
         with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
             # Clear singleton to avoid interference from other tests
             import libs.llm_client
+
             libs.llm_client._client_instance = None
-            
+
             client1 = get_llm_client()
             client2 = get_llm_client()
 
