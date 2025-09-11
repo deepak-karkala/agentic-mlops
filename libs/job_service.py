@@ -11,8 +11,12 @@ from typing import Optional, List
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func
 
+import logging
+
 from libs.models import Job, JobStatus, DecisionSet, Project
 from libs.database import create_database_engine, create_session_maker
+
+logger = logging.getLogger(__name__)
 
 
 class JobService:
@@ -56,7 +60,15 @@ class JobService:
         self.session.add(job)
         self.session.commit()
         self.session.refresh(job)
-
+        logger.info(
+            "Job created",
+            extra={
+                "job_id": job.id,
+                "type": job_type,
+                "decision_set_id": decision_set_id,
+                "priority": priority,
+            },
+        )
         return job
 
     def claim_job(
@@ -108,6 +120,14 @@ class JobService:
 
             self.session.commit()
             self.session.refresh(job)
+            logger.info(
+                "Job claimed",
+                extra={
+                    "job_id": job.id,
+                    "worker_id": worker_id,
+                    "lease_expires_at": str(lease_expires_at),
+                },
+            )
 
         return job
 
@@ -141,6 +161,9 @@ class JobService:
             job.lease_expires_at = None
 
             self.session.commit()
+            logger.info(
+                "Job completed", extra={"job_id": job_id, "worker_id": worker_id}
+            )
             return True
 
         return False
@@ -179,12 +202,29 @@ class JobService:
                 job.completed_at = datetime.datetime.now(datetime.timezone.utc)
                 job.worker_id = None
                 job.lease_expires_at = None
+                logger.error(
+                    "Job failed (max retries)",
+                    extra={
+                        "job_id": job_id,
+                        "worker_id": worker_id,
+                        "error": error_message,
+                    },
+                )
             else:
                 # Retry the job by putting it back in the queue
                 job.status = JobStatus.QUEUED
                 job.worker_id = None
                 job.lease_expires_at = None
                 job.started_at = None
+                logger.warning(
+                    "Job requeued after failure",
+                    extra={
+                        "job_id": job_id,
+                        "worker_id": worker_id,
+                        "retry_count": job.retry_count,
+                        "error": error_message,
+                    },
+                )
 
             self.session.commit()
             return True

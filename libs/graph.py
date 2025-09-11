@@ -1,12 +1,31 @@
 from __future__ import annotations
 
-from typing import Literal, TypedDict, Optional, List, Dict, Any
+from typing import Literal, TypedDict
+import asyncio
+import logging
+import time
 
 from langgraph.graph import START, END, MessagesState, StateGraph
 from langgraph.pregel import Pregel
 from langchain_core.messages import AIMessage, HumanMessage
 
 from libs.database import create_appropriate_checkpointer
+from libs.agent_framework import (
+    MLOpsWorkflowState,
+    TriggerType,
+)
+# Legacy agents removed - using only LLM-powered agents
+
+# New LLM-powered agents
+from libs.intake_extract_agent import create_intake_extract_agent
+from libs.coverage_check_agent import create_coverage_check_agent
+from libs.adaptive_questions_agent import create_adaptive_questions_agent
+from libs.llm_planner_agent import create_llm_planner_agent
+from libs.llm_tech_critic_agent import create_llm_tech_critic_agent
+from libs.llm_cost_critic_agent import create_llm_cost_critic_agent
+from libs.llm_policy_engine_agent import create_llm_policy_engine_agent
+
+logger = logging.getLogger(__name__)
 
 
 class ChatMessage(TypedDict):
@@ -16,194 +35,534 @@ class ChatMessage(TypedDict):
     content: str
 
 
-class MLOpsProjectState(TypedDict):
-    """
-    Full state schema for the MLOps planning and generation workflow.
-    Based on the requirements in implementation_details.md section 21.2.
-    """
-
-    # Original messages for compatibility with existing API
-    messages: List[Any]
-
-    # Core workflow state
-    constraints: Optional[Dict[str, Any]]
-    coverage: Optional[Dict[str, Any]]
-    plan: Optional[Dict[str, Any]]
-    candidates: Optional[List[Dict[str, Any]]]
-    tech_critique: Optional[Dict[str, Any]]  # From critic_tech
-    cost: Optional[Dict[str, Any]]
-    policy: Optional[Dict[str, Any]]
-    hitl: Optional[Dict[str, Any]]
-    artifacts: Optional[Dict[str, Any]]
-    reports: Optional[Dict[str, Any]]
-    rationale: Optional[Dict[str, Any]]  # From rationale_compile
-    diff_summary: Optional[Dict[str, Any]]
-    run_meta: Optional[Dict[str, Any]]
+# MLOpsWorkflowState is now imported from agent_framework.py to eliminate duplication
 
 
-# Agent node functions (initially as stubs)
+# Initialize LLM-powered agents
+_llm_intake_extract_agent = None
+_llm_coverage_check_agent = None
+_llm_adaptive_questions_agent = None
+_llm_planner_agent = None
+_llm_tech_critic_agent = None
+_llm_cost_critic_agent = None
+_llm_policy_engine_agent = None
 
 
-def intake_extract(state: MLOpsProjectState) -> MLOpsProjectState:
-    """Parse freeform input into Constraint Schema."""
-    messages = state.get("messages", [])
-
-    # Extract user prompt from messages
-    user_prompt = "Default user prompt"
-    for msg in reversed(messages):
-        if isinstance(msg, HumanMessage):
-            user_prompt = msg.content
-            break
-
-    # Mock constraint extraction
-    constraints = {
-        "extracted_from": user_prompt,
-        "cloud": "aws",
-        "region": "us-east-1",
-        "budget_band": "startup",
-        "data_classification": "internal",
-    }
-
-    return {"constraints": constraints}
+# Legacy _get_agents() function removed - using only LLM-powered agents
 
 
-def coverage_check(state: MLOpsProjectState) -> MLOpsProjectState:
-    """Compute coverage score and emit missing/ambiguous fields."""
-    _constraints = state.get("constraints", {})
+def _get_llm_agents():
+    """Lazy initialization of LLM-powered agents."""
+    global \
+        _llm_intake_extract_agent, \
+        _llm_coverage_check_agent, \
+        _llm_adaptive_questions_agent, \
+        _llm_planner_agent, \
+        _llm_tech_critic_agent, \
+        _llm_cost_critic_agent, \
+        _llm_policy_engine_agent
 
-    # Mock coverage analysis
-    coverage = {
-        "score": 0.75,
-        "missing_fields": ["sla_latency_ms", "throughput"],
-        "ambiguous_fields": [],
-        "complete": True,  # For now, assume complete
-    }
+    if _llm_intake_extract_agent is None:
+        _llm_intake_extract_agent = create_intake_extract_agent()
+        _llm_coverage_check_agent = create_coverage_check_agent()
+        _llm_adaptive_questions_agent = create_adaptive_questions_agent()
+        _llm_planner_agent = create_llm_planner_agent()
+        _llm_tech_critic_agent = create_llm_tech_critic_agent()
+        _llm_cost_critic_agent = create_llm_cost_critic_agent()
+        _llm_policy_engine_agent = create_llm_policy_engine_agent()
 
-    return {"coverage": coverage}
-
-
-def adaptive_questions(state: MLOpsProjectState) -> MLOpsProjectState:
-    """Generate follow-up questions if coverage is insufficient."""
-    _coverage = state.get("coverage", {})
-
-    # For now, just pass through - no additional questions
-    return {}
-
-
-def planner(state: MLOpsProjectState) -> MLOpsProjectState:
-    """Compose capability patterns into a candidate plan."""
-    _constraints = state.get("constraints", {})
-
-    # Mock MLOps plan
-    plan = {
-        "architecture_type": "serverless_ml",
-        "services": {
-            "data_ingestion": "s3_batch",
-            "feature_engineering": "sagemaker_processing",
-            "training": "sagemaker_training",
-            "model_registry": "sagemaker_model_registry",
-            "inference": "sagemaker_serverless",
-        },
-        "estimated_monthly_cost": 420.0,
-    }
-
-    candidates = [
-        {"id": "serverless_option", "summary": "Serverless ML stack", "plan": plan}
-    ]
-
-    return {"plan": plan, "candidates": candidates}
+    return (
+        _llm_intake_extract_agent,
+        _llm_coverage_check_agent,
+        _llm_adaptive_questions_agent,
+        _llm_planner_agent,
+        _llm_tech_critic_agent,
+        _llm_cost_critic_agent,
+        _llm_policy_engine_agent,
+    )
 
 
-def critic_tech(state: MLOpsProjectState) -> MLOpsProjectState:
-    """Analyze feasibility, coupling, bottlenecks; emit risks."""
-    _plan = state.get("plan", {})
-
-    # Mock technical criticism
-    tech_critique = {
-        "feasibility_score": 0.85,
-        "risks": ["cold start latency for serverless inference"],
-        "bottlenecks": ["feature engineering step"],
-        "recommendations": ["consider feature store for low latency"],
-    }
-
-    return {"tech_critique": tech_critique}
+# Agent node functions (using real agent implementations)
 
 
-def critic_cost(state: MLOpsProjectState) -> MLOpsProjectState:
-    """Generate coarse BOM and monthly estimate; compute deltas vs previous."""
-    plan = state.get("plan", {})
+def intake_extract(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
+    """Parse freeform input into Constraint Schema using LLM-powered agent."""
+    intake_extract_agent, _, _, _, _, _, _ = _get_llm_agents()
+    start = time.time()
+    thread_id = state.get("decision_set_id") or state.get("project_id") or "unknown"
+    logger.info("Node start: intake_extract", extra={"thread_id": thread_id})
 
-    # Mock cost analysis
-    cost = {
-        "monthly_usd": plan.get("estimated_monthly_cost", 420.0),
-        "breakdown": [
-            {"service": "sagemaker_training", "monthly_usd": 200.0},
-            {"service": "sagemaker_inference", "monthly_usd": 150.0},
-            {"service": "s3_storage", "monthly_usd": 70.0},
-        ],
-        "confidence": 0.7,
-    }
+    try:
+        # Execute agent directly with MLOpsWorkflowState - no conversion needed
+        result = asyncio.run(intake_extract_agent.execute(state, TriggerType.INITIAL))
 
-    return {"cost": cost}
+        if result.success:
+            # Extract state updates from the agent result
+            state_updates = result.state_updates
+
+            # Store reason card
+            reason_cards = state.get("reason_cards", [])
+            reason_cards.append(result.reason_card.model_dump())
+
+            # Update execution order
+            execution_order = state.get("execution_order", [])
+            execution_order.append("intake_extract")
+
+            out = {
+                **state_updates,
+                "reason_cards": reason_cards,
+                "execution_order": execution_order,
+            }
+            logger.info(
+                "Node success: intake_extract",
+                extra={
+                    "thread_id": thread_id,
+                    "duration_ms": int((time.time() - start) * 1000),
+                },
+            )
+            return out
+        else:
+            # Return error state
+            logger.warning(
+                "Node failure: intake_extract",
+                extra={"thread_id": thread_id, "error": result.error_message},
+            )
+            return {"constraints": {}, "error": result.error_message}
+
+    except Exception as e:
+        logger.exception(
+            "Node exception: intake_extract",
+            extra={"thread_id": thread_id, "error": str(e)},
+        )
+        return {"constraints": {}, "error": f"Intake extract agent failed: {str(e)}"}
 
 
-def policy_eval(state: MLOpsProjectState) -> MLOpsProjectState:
-    """Apply rules; pass/warn/fail with explanations."""
-    _constraints = state.get("constraints", {})
-    _cost = state.get("cost", {})
+def coverage_check(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
+    """Compute coverage score and emit missing/ambiguous fields using LLM-powered agent."""
+    _, coverage_check_agent, _, _, _, _, _ = _get_llm_agents()
+    start = time.time()
+    thread_id = state.get("decision_set_id") or state.get("project_id") or "unknown"
+    logger.info("Node start: coverage_check", extra={"thread_id": thread_id})
 
-    # Mock policy evaluation
-    policy = {
-        "overall_status": "pass",
-        "rules": [
-            {"id": "budget_check", "status": "pass", "detail": "Within startup budget"},
-            {"id": "region_check", "status": "pass", "detail": "Using approved region"},
-            {
-                "id": "data_classification",
-                "status": "pass",
-                "detail": "Internal data handling OK",
+    try:
+        # Execute agent directly with MLOpsWorkflowState - no conversion needed
+        result = asyncio.run(coverage_check_agent.execute(state, TriggerType.INITIAL))
+
+        if result.success:
+            # Extract state updates from the agent result
+            state_updates = result.state_updates
+
+            # Store reason card
+            reason_cards = state.get("reason_cards", [])
+            reason_cards.append(result.reason_card.model_dump())
+
+            # Update execution order
+            execution_order = state.get("execution_order", [])
+            execution_order.append("coverage_check")
+
+            # Maintain backward compatibility
+            coverage_score = state_updates.get("coverage_score", 0.0)
+            coverage_analysis = state_updates.get("coverage_analysis", {})
+
+            coverage = {
+                "score": coverage_score,
+                "missing_fields": coverage_analysis.get("critical_gaps", []),
+                "ambiguous_fields": coverage_analysis.get("ambiguous_fields", []),
+                "complete": coverage_analysis.get("threshold_met", False),
+            }
+
+            out = {
+                **state_updates,
+                "coverage": coverage,  # Legacy compatibility
+                "reason_cards": reason_cards,
+                "execution_order": execution_order,
+            }
+            logger.info(
+                "Node success: coverage_check",
+                extra={
+                    "thread_id": thread_id,
+                    "duration_ms": int((time.time() - start) * 1000),
+                    "coverage_score": coverage_score,
+                },
+            )
+            return out
+        else:
+            # Return error state with defaults
+            logger.warning(
+                "Node failure: coverage_check",
+                extra={"thread_id": thread_id, "error": result.error_message},
+            )
+            return {
+                "coverage_score": 0.0,
+                "coverage": {
+                    "score": 0.0,
+                    "missing_fields": [],
+                    "ambiguous_fields": [],
+                    "complete": False,
+                },
+                "error": result.error_message,
+            }
+
+    except Exception as e:
+        logger.exception(
+            "Node exception: coverage_check",
+            extra={"thread_id": thread_id, "error": str(e)},
+        )
+        return {
+            "coverage_score": 0.0,
+            "coverage": {
+                "score": 0.0,
+                "missing_fields": [],
+                "ambiguous_fields": [],
+                "complete": False,
             },
-        ],
-    }
-
-    return {"policy": policy}
+            "error": f"Coverage check agent failed: {str(e)}",
+        }
 
 
-def gate_hitl(state: MLOpsProjectState) -> MLOpsProjectState:
+def adaptive_questions(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
+    """Generate follow-up questions if coverage is insufficient using LLM-powered agent."""
+    _, _, adaptive_questions_agent, _, _, _, _ = _get_llm_agents()
+
+    # Check if questioning should continue
+    coverage_score = state.get("coverage_score", 0.0)
+    questioning_complete = state.get("questioning_complete", False)
+
+    # Skip if already complete or coverage is sufficient
+    if questioning_complete or coverage_score >= 0.75:
+        logging.getLogger(__name__).info(
+            "Node skip: adaptive_questions",
+            extra={"reason": "coverage_sufficient", "coverage_score": coverage_score},
+        )
+        return {"questioning_complete": True}
+
+    start = time.time()
+    thread_id = state.get("decision_set_id") or state.get("project_id") or "unknown"
+    logger.info("Node start: adaptive_questions", extra={"thread_id": thread_id})
+
+    try:
+        # Execute agent directly with MLOpsWorkflowState - no conversion needed
+        result = asyncio.run(
+            adaptive_questions_agent.execute(state, TriggerType.INITIAL)
+        )
+
+        if result.success:
+            # Extract state updates from the agent result
+            state_updates = result.state_updates
+
+            # Store reason card
+            reason_cards = state.get("reason_cards", [])
+            reason_cards.append(result.reason_card.model_dump())
+
+            # Update execution order
+            execution_order = state.get("execution_order", [])
+            execution_order.append("adaptive_questions")
+
+            out = {
+                **state_updates,
+                "reason_cards": reason_cards,
+                "execution_order": execution_order,
+            }
+            logger.info(
+                "Node success: adaptive_questions",
+                extra={
+                    "thread_id": thread_id,
+                    "duration_ms": int((time.time() - start) * 1000),
+                },
+            )
+            return out
+        else:
+            # Return error state but allow workflow to continue
+            logger.warning(
+                "Node failure: adaptive_questions",
+                extra={"thread_id": thread_id, "error": result.error_message},
+            )
+            return {"questioning_complete": True, "error": result.error_message}
+
+    except Exception as e:
+        logger.exception(
+            "Node exception: adaptive_questions",
+            extra={"thread_id": thread_id, "error": str(e)},
+        )
+        return {
+            "questioning_complete": True,
+            "error": f"Adaptive questions agent failed: {str(e)}",
+        }
+
+
+def planner(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
+    """Compose capability patterns into a candidate plan using LLM-powered PlannerAgent."""
+    _, _, _, llm_planner_agent, _, _, _ = _get_llm_agents()
+
+    start = time.time()
+    thread_id = state.get("decision_set_id") or state.get("project_id") or "unknown"
+    logger.info("Node start: planner", extra={"thread_id": thread_id})
+
+    try:
+        # Execute agent directly with MLOpsWorkflowState - no conversion needed
+        result = asyncio.run(llm_planner_agent.execute(state, TriggerType.INITIAL))
+
+        if result.success:
+            # Extract state updates from the agent result
+            state_updates = result.state_updates
+
+            # Store reason card
+            reason_cards = state.get("reason_cards", [])
+            reason_cards.append(result.reason_card.model_dump())
+
+            # Update execution order
+            execution_order = state.get("execution_order", [])
+            execution_order.append("planner")
+
+            # Maintain backward compatibility
+            plan = state_updates.get("plan", {})
+            selected_pattern_id = plan.get("pattern_id", "unknown")
+
+            out = {
+                **state_updates,
+                "selected_pattern_id": selected_pattern_id,  # Legacy compatibility
+                "reason_cards": reason_cards,
+                "execution_order": execution_order,
+                "agent_outputs": {
+                    **state.get("agent_outputs", {}),
+                    "planner": result.reason_card.outputs,
+                },
+            }
+            logger.info(
+                "Node success: planner",
+                extra={
+                    "thread_id": thread_id,
+                    "duration_ms": int((time.time() - start) * 1000),
+                    "pattern_id": selected_pattern_id,
+                },
+            )
+            return out
+        else:
+            # Agent failed - return error state
+            logger.warning(
+                "Node failure: planner",
+                extra={"thread_id": thread_id, "error": result.error_message},
+            )
+            return {"plan": {}, "error": result.error_message}
+
+    except Exception as e:
+        logger.exception(
+            "Node exception: planner", extra={"thread_id": thread_id, "error": str(e)}
+        )
+        return {"plan": {}, "error": f"Planner agent failed: {str(e)}"}
+
+
+def critic_tech(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
+    """Analyze feasibility, coupling, bottlenecks using LLM-powered TechCriticAgent."""
+    _, _, _, _, llm_tech_critic_agent, _, _ = _get_llm_agents()
+
+    start = time.time()
+    thread_id = state.get("decision_set_id") or state.get("project_id") or "unknown"
+    logger.info("Node start: critic_tech", extra={"thread_id": thread_id})
+
+    try:
+        # Execute agent directly with MLOpsWorkflowState - no conversion needed
+        result = asyncio.run(llm_tech_critic_agent.execute(state, TriggerType.INITIAL))
+
+        if result.success:
+            # Extract state updates from the agent result
+            state_updates = result.state_updates
+
+            # Store reason card
+            reason_cards = state.get("reason_cards", [])
+            reason_cards.append(result.reason_card.model_dump())
+
+            # Update execution order
+            execution_order = state.get("execution_order", [])
+            execution_order.append("critic_tech")
+
+            out = {
+                **state_updates,
+                "reason_cards": reason_cards,
+                "execution_order": execution_order,
+                "agent_outputs": {
+                    **state.get("agent_outputs", {}),
+                    "tech_critic": result.reason_card.outputs,
+                },
+            }
+            logger.info(
+                "Node success: critic_tech",
+                extra={
+                    "thread_id": thread_id,
+                    "duration_ms": int((time.time() - start) * 1000),
+                },
+            )
+            return out
+        else:
+            return {"tech_critique": {}, "error": result.error_message}
+
+    except Exception as e:
+        logger.exception(
+            "Node exception: critic_tech",
+            extra={"thread_id": thread_id, "error": str(e)},
+        )
+        return {"tech_critique": {}, "error": f"Tech critic agent failed: {str(e)}"}
+
+
+def critic_cost(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
+    """Generate coarse BOM and monthly estimate using LLM-powered CostCriticAgent."""
+    _, _, _, _, _, llm_cost_critic_agent, _ = _get_llm_agents()
+
+    start = time.time()
+    thread_id = state.get("decision_set_id") or state.get("project_id") or "unknown"
+    logger.info("Node start: critic_cost", extra={"thread_id": thread_id})
+
+    try:
+        # Execute agent directly with MLOpsWorkflowState - no conversion needed
+        result = asyncio.run(llm_cost_critic_agent.execute(state, TriggerType.INITIAL))
+
+        if result.success:
+            # Extract state updates from the agent result
+            state_updates = result.state_updates
+
+            # Store reason card
+            reason_cards = state.get("reason_cards", [])
+            reason_cards.append(result.reason_card.model_dump())
+
+            # Update execution order
+            execution_order = state.get("execution_order", [])
+            execution_order.append("critic_cost")
+
+            out = {
+                **state_updates,
+                "cost": state_updates.get(
+                    "cost_estimate", {}
+                ),  # Legacy field for backward compatibility
+                "reason_cards": reason_cards,
+                "execution_order": execution_order,
+                "agent_outputs": {
+                    **state.get("agent_outputs", {}),
+                    "cost_critic": result.reason_card.outputs,
+                },
+            }
+            logger.info(
+                "Node success: critic_cost",
+                extra={
+                    "thread_id": thread_id,
+                    "duration_ms": int((time.time() - start) * 1000),
+                },
+            )
+            return out
+        else:
+            return {"cost_estimate": {}, "error": result.error_message}
+
+    except Exception as e:
+        logger.exception(
+            "Node exception: critic_cost",
+            extra={"thread_id": thread_id, "error": str(e)},
+        )
+        return {"cost_estimate": {}, "error": f"Cost critic agent failed: {str(e)}"}
+
+
+def policy_eval(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
+    """Apply governance rules using LLM-powered PolicyEngineAgent."""
+    _, _, _, _, _, _, llm_policy_engine_agent = _get_llm_agents()
+    start = time.time()
+    thread_id = state.get("decision_set_id") or state.get("project_id") or "unknown"
+    logger.info("Node start: policy_eval", extra={"thread_id": thread_id})
+
+    try:
+        # Execute agent directly with MLOpsWorkflowState - no conversion needed
+        result = asyncio.run(
+            llm_policy_engine_agent.execute(state, TriggerType.INITIAL)
+        )
+
+        if result.success:
+            # Extract state updates from the agent result
+            state_updates = result.state_updates
+
+            # Store reason card
+            reason_cards = state.get("reason_cards", [])
+            reason_cards.append(result.reason_card.model_dump())
+
+            # Update execution order
+            execution_order = state.get("execution_order", [])
+            execution_order.append("policy_eval")
+
+            out = {
+                **state_updates,
+                "policy_results": state_updates.get(
+                    "policy_validation", {}
+                ),  # Legacy compatibility
+                "policy": state_updates.get(
+                    "policy_validation", {}
+                ),  # Legacy field for backward compatibility
+                "reason_cards": reason_cards,
+                "execution_order": execution_order,
+                "agent_outputs": {
+                    **state.get("agent_outputs", {}),
+                    "policy_engine": result.reason_card.outputs,
+                },
+            }
+            logger.info(
+                "Node success: policy_eval",
+                extra={
+                    "thread_id": thread_id,
+                    "duration_ms": int((time.time() - start) * 1000),
+                },
+            )
+            return out
+        else:
+            return {"policy_results": {}, "error": result.error_message}
+
+    except Exception as e:
+        logger.exception(
+            "Node exception: policy_eval",
+            extra={"thread_id": thread_id, "error": str(e)},
+        )
+        return {"policy_results": {}, "error": f"Policy engine agent failed: {str(e)}"}
+
+
+def gate_hitl(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
     """Human-in-the-loop approval gate (interrupt point)."""
     # This will be an interrupt point in the actual implementation
-    # For now, just pass through
+    # For now, just pass through with auto-approval
+    _ = state  # Acknowledge state parameter for future HITL implementation
+
     hitl = {
         "status": "approved",
         "comment": "Auto-approved for testing",
         "timestamp": "2025-01-01T00:00:00Z",
     }
 
+    logging.getLogger(__name__).info("Node pass-through: gate_hitl auto-approved")
     return {"hitl": hitl}
 
 
-def codegen(state: MLOpsProjectState) -> MLOpsProjectState:
+def codegen(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
     """Generate repo skeletons (services, IaC, CI, docs)."""
-    _plan = state.get("plan", {})
+    state.get("plan", {})
 
-    # Mock code generation
-    artifacts = {
-        "repo_structure": {
-            "terraform/": "Infrastructure as code",
-            "src/": "Application code",
-            "ci/": "CI/CD pipelines",
-            "docs/": "Documentation",
+    # Mock code generation (real implementation would use Claude Code SDK)
+    artifacts = [
+        {
+            "path": "terraform/main.tf",
+            "kind": "infrastructure",
+            "size_bytes": 1024,
+            "created_at": "2025-01-01T00:00:00Z",
         },
-        "file_count": 25,
-        "generated_timestamp": "2025-01-01T00:00:00Z",
-    }
+        {
+            "path": "src/main.py",
+            "kind": "application",
+            "size_bytes": 2048,
+            "created_at": "2025-01-01T00:00:00Z",
+        },
+    ]
 
+    logging.getLogger(__name__).info(
+        "Node success: codegen", extra={"artifact_count": len(artifacts)}
+    )
     return {"artifacts": artifacts}
 
 
-def validators(state: MLOpsProjectState) -> MLOpsProjectState:
+def validators(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
     """Run static checks; compile /reports."""
-    _artifacts = state.get("artifacts", {})
+    artifacts = state.get("artifacts", [])
 
     # Mock validation results
     reports = {
@@ -211,45 +570,56 @@ def validators(state: MLOpsProjectState) -> MLOpsProjectState:
         "ruff_check": {"status": "pass", "issues": []},
         "security_scan": {"status": "pass", "secrets_found": 0},
         "overall_status": "pass",
+        "artifacts_validated": len(artifacts),
     }
 
+    logging.getLogger(__name__).info(
+        "Node success: validators", extra={"artifacts": len(artifacts)}
+    )
     return {"reports": reports}
 
 
-def rationale_compile(state: MLOpsProjectState) -> MLOpsProjectState:
+def rationale_compile(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
     """Transform per-node rationale into Reason Cards and Design Rationale doc."""
-    # Mock rationale compilation
+    reason_cards = state.get("reason_cards", [])
+
     rationale = {
-        "reason_cards": [
-            {
-                "node": "planner",
-                "decision": "chose serverless architecture",
-                "rationale": "cost effective for startup",
-            },
-            {
-                "node": "critic_cost",
-                "decision": "approved cost estimate",
-                "rationale": "within budget constraints",
-            },
-        ],
-        "design_doc": "Generated design rationale document",
+        "reason_cards": reason_cards,
+        "reason_card_count": len(reason_cards),
+        "design_doc": f"Generated design rationale with {len(reason_cards)} decisions documented",
+        "agents_executed": list(
+            set([card.get("agent", "unknown") for card in reason_cards])
+        ),
     }
 
+    logging.getLogger(__name__).info(
+        "Node success: rationale_compile",
+        extra={"reason_cards": len(reason_cards)},
+    )
     return {"rationale": rationale}
 
 
-def diff_and_persist(state: MLOpsProjectState) -> MLOpsProjectState:
+def diff_and_persist(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
     """Commit artifacts to git/S3; write decision_set + events; output composite Change Summary."""
-    # Mock diff and persistence
+    artifacts = state.get("artifacts", [])
+    cost_estimate = state.get("cost_estimate", {})
+
     diff_summary = {
-        "files_added": 25,
+        "files_added": len(artifacts),
         "files_modified": 0,
         "files_removed": 0,
-        "cost_delta_usd": 420.0,
+        "cost_delta_usd": cost_estimate.get("monthly_usd", 0),
         "git_commit": "abc123",
-        "s3_artifact_key": "projects/test/artifacts/abc123.zip",
+        "s3_artifact_key": f"projects/{state.get('project_id', 'test')}/artifacts/abc123.zip",
     }
 
+    logging.getLogger(__name__).info(
+        "Node success: diff_and_persist",
+        extra={
+            "files_added": diff_summary["files_added"],
+            "cost_delta_usd": diff_summary["cost_delta_usd"],
+        },
+    )
     return {"diff_summary": diff_summary}
 
 
@@ -284,25 +654,26 @@ def call_llm(state: MessagesState) -> MessagesState:
 
 def build_full_graph() -> Pregel:
     """
-    Build and compile the full MLOps workflow graph with all agent nodes.
+    Build and compile the full MLOps workflow graph with real agent implementations.
 
     This creates the complete deterministic sequential graph as specified in
-    implementation_details.md section 21.1. All nodes are initially stubs
-    that return mock data for testing the graph topology.
+    implementation_details.md section 21.1. The core planning nodes (planner,
+    critics, policy engine) now use the real agent implementations for
+    transparent decision making.
 
     Returns:
         Compiled StateGraph ready for execution
     """
-    graph = StateGraph(MLOpsProjectState)
+    graph = StateGraph(MLOpsWorkflowState)
 
     # Add all agent nodes in the order specified in section 21.1
     graph.add_node("intake_extract", intake_extract)
     graph.add_node("coverage_check", coverage_check)
     graph.add_node("adaptive_questions", adaptive_questions)
-    graph.add_node("planner", planner)
-    graph.add_node("critic_tech", critic_tech)
-    graph.add_node("critic_cost", critic_cost)
-    graph.add_node("policy_eval", policy_eval)
+    graph.add_node("planner", planner)  # Now uses real PlannerAgent
+    graph.add_node("critic_tech", critic_tech)  # Now uses real TechCriticAgent
+    graph.add_node("critic_cost", critic_cost)  # Now uses real CostCriticAgent
+    graph.add_node("policy_eval", policy_eval)  # Now uses real PolicyEngineAgent
     graph.add_node("gate_hitl", gate_hitl)
     graph.add_node("codegen", codegen)
     graph.add_node("validators", validators)

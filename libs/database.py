@@ -7,6 +7,7 @@ and LangGraph checkpointing.
 """
 
 import os
+import logging
 from typing import Optional
 from sqlalchemy import create_engine, Engine
 from sqlalchemy.orm import sessionmaker, Session
@@ -94,14 +95,18 @@ def create_appropriate_checkpointer():
     database_url = get_database_url()
 
     # Production: Use PostgreSQL checkpointer
+    logger = logging.getLogger(__name__)
+
     if database_url.startswith("postgresql://") and POSTGRES_CHECKPOINTER_AVAILABLE:
         try:
             checkpointer = PostgresSaver.from_conn_string(database_url)
             checkpointer.setup()
-            print("✅ Using PostgresSaver for production persistence")
+            logger.info("Using PostgresSaver for production persistence")
             return checkpointer
         except Exception as e:
-            print(f"⚠️  PostgresSaver failed: {e}")
+            logger.warning(
+                "PostgresSaver initialization failed", extra={"error": str(e)}
+            )
             # Fall through to next option
 
     # Development: Use SQLite checkpointer
@@ -112,7 +117,7 @@ def create_appropriate_checkpointer():
                 # In-memory SQLite - use memory checkpointer instead
                 if MEMORY_CHECKPOINTER_AVAILABLE:
                     checkpointer = MemorySaver()
-                    print("✅ Using MemorySaver for in-memory testing")
+                    logger.info("Using MemorySaver for in-memory testing")
                     return checkpointer
             else:
                 # File-based SQLite
@@ -129,22 +134,23 @@ def create_appropriate_checkpointer():
 
                 conn = sqlite3.connect(checkpoint_path, check_same_thread=False)
                 checkpointer = SqliteSaver(conn)
-                print(
-                    f"✅ Using SqliteSaver for development persistence: {checkpoint_path}"
+                logger.info(
+                    "Using SqliteSaver for development persistence",
+                    extra={"path": checkpoint_path},
                 )
                 return checkpointer
         except Exception as e:
-            print(f"⚠️  SqliteSaver failed: {e}")
+            logger.warning("SqliteSaver initialization failed", extra={"error": str(e)})
             # Fall through to memory checkpointer
 
     # Fallback: Use in-memory checkpointer
     if MEMORY_CHECKPOINTER_AVAILABLE:
         checkpointer = MemorySaver()
-        print("✅ Using MemorySaver as fallback (no persistence)")
+        logger.info("Using MemorySaver as fallback (no persistence)")
         return checkpointer
 
     # No checkpointer available
-    print("❌ No checkpointer available - running without persistence")
+    logger.error("No checkpointer available - running without persistence")
     return None
 
 
