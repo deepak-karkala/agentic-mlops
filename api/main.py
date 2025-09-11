@@ -4,18 +4,27 @@ import os
 import uuid
 from typing import List, Literal, Optional
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
 from sqlalchemy.orm import Session
+import logging
+import time
 
-from libs.graph import build_thin_graph
+from libs.graph import build_full_graph, build_thin_graph
 from libs.job_service import JobService, create_decision_set_for_thread
 from libs.database import create_database_engine, create_session_maker
 from libs.models import JobStatus, Job
 
 app = FastAPI()
+
+# Configure logging (API)
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 # CORS configuration based on environment
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
@@ -54,6 +63,7 @@ app.add_middleware(
 @app.get("/")
 def read_root() -> dict[str, str]:
     """Simple root endpoint for health checks."""
+    logger.debug("Health check invoked")
     return {"message": "Agentic MLOps API"}
 
 
@@ -86,7 +96,20 @@ class JobStatusResponse(BaseModel):
     thread_id: str
 
 
-_graph = build_thin_graph()
+# Select graph based on env flag, with safe fallback
+USE_FULL_GRAPH = os.getenv("USE_FULL_GRAPH", "false").lower() in {"1", "true", "yes"}
+try:
+    if USE_FULL_GRAPH:
+        logger.info("Initializing full graph (USE_FULL_GRAPH=true)")
+        _graph = build_full_graph()
+    else:
+        logger.info("Initializing thin graph (default)")
+        _graph = build_thin_graph()
+except Exception as e:
+    logger.warning(
+        "Graph init failed; falling back to thin graph", extra={"error": str(e)}
+    )
+    _graph = build_thin_graph()
 
 # Database setup
 engine = create_database_engine()
@@ -133,35 +156,61 @@ def _convert_from_langchain_message(lc_msg) -> ChatMessage:
 
 
 @app.post("/api/chat", response_model=ChatResponse)
-def chat(req: ChatRequest) -> ChatResponse:
+def chat(req: ChatRequest, request: Request) -> ChatResponse:
     """
     Synchronous chat endpoint for backward compatibility.
 
     This endpoint processes messages immediately and returns results.
     For production use, prefer the async endpoint /api/chat/async
     """
+    start = time.time()
     # Generate thread_id if not provided
     thread_id = req.thread_id or str(uuid.uuid4())
+    logger.info(
+        "POST /api/chat received",
+        extra={
+            "thread_id": thread_id,
+            "client": request.client.host if request.client else None,
+            "msg_count": len(req.messages),
+        },
+    )
 
-    # Convert input messages to Langchain format
-    lc_messages = [_convert_to_langchain_message(m) for m in req.messages]
-    state = {"messages": lc_messages}
+    try:
+        # Convert input messages to Langchain format
+        lc_messages = [_convert_to_langchain_message(m) for m in req.messages]
+        state = {"messages": lc_messages}
 
-    # Create config with thread_id for checkpointing
-    config = {"configurable": {"thread_id": thread_id}}
+        # Create config with thread_id for checkpointing
+        config = {"configurable": {"thread_id": thread_id}}
 
-    # Invoke the graph with config for persistence
-    result = _graph.invoke(state, config=config)
+        # Invoke the graph with config for persistence
+        result = _graph.invoke(state, config=config)
 
-    # Convert all messages back to our format
-    all_messages = result.get("messages", [])
-    converted_messages = [_convert_from_langchain_message(m) for m in all_messages]
+        # Convert all messages back to our format
+        all_messages = result.get("messages", [])
+        converted_messages = [_convert_from_langchain_message(m) for m in all_messages]
 
-    return ChatResponse(messages=converted_messages, thread_id=thread_id)
+        logger.info(
+            "POST /api/chat completed",
+            extra={
+                "thread_id": thread_id,
+                "duration_ms": int((time.time() - start) * 1000),
+                "response_msg_count": len(converted_messages),
+            },
+        )
+        return ChatResponse(messages=converted_messages, thread_id=thread_id)
+    except Exception as e:
+        logger.exception(
+            "POST /api/chat failed",
+            extra={"thread_id": thread_id, "error": str(e)},
+        )
+        raise HTTPException(status_code=500, detail="Chat processing failed")
 
 
 @app.post("/api/chat/async", response_model=AsyncChatResponse)
-def chat_async(req: ChatRequest, db: Session = Depends(get_db)) -> AsyncChatResponse:
+def chat_async(
+    req: ChatRequest, db: Session = Depends(get_db), request: Request = None
+) -> AsyncChatResponse:
     """
     Asynchronous chat endpoint that enqueues jobs for worker processing.
 
@@ -170,8 +219,17 @@ def chat_async(req: ChatRequest, db: Session = Depends(get_db)) -> AsyncChatResp
     - Allows the API to remain responsive under load
     - Enables distributed processing via workers
     """
+    start = time.time()
     # Generate thread_id if not provided
     thread_id = req.thread_id or str(uuid.uuid4())
+    logger.info(
+        "POST /api/chat/async received",
+        extra={
+            "thread_id": thread_id,
+            "client": request.client.host if request and request.client else None,
+            "msg_count": len(req.messages),
+        },
+    )
 
     # Extract user prompt from the last user message
     user_prompt = "Default chat request"
@@ -195,6 +253,16 @@ def chat_async(req: ChatRequest, db: Session = Depends(get_db)) -> AsyncChatResp
             },
         )
 
+        logger.info(
+            "Job enqueued",
+            extra={
+                "thread_id": thread_id,
+                "decision_set_id": decision_set.id,
+                "job_id": job.id,
+                "duration_ms": int((time.time() - start) * 1000),
+            },
+        )
+
         return AsyncChatResponse(
             decision_set_id=decision_set.id,
             thread_id=thread_id,
@@ -203,7 +271,11 @@ def chat_async(req: ChatRequest, db: Session = Depends(get_db)) -> AsyncChatResp
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create job: {str(e)}")
+        logger.exception(
+            "POST /api/chat/async failed",
+            extra={"thread_id": thread_id, "error": str(e)},
+        )
+        raise HTTPException(status_code=500, detail="Failed to create job")
 
 
 @app.get("/api/jobs/{job_id}/status", response_model=JobStatusResponse)
@@ -214,8 +286,10 @@ def get_job_status(job_id: str, db: Session = Depends(get_db)) -> JobStatusRespo
     Use this endpoint to poll for job completion after using /api/chat/async
     """
     # Get the job
+    logger.debug("GET /api/jobs/status", extra={"job_id": job_id})
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
+        logger.warning("Job not found", extra={"job_id": job_id})
         raise HTTPException(status_code=404, detail="Job not found")
 
     return JobStatusResponse(

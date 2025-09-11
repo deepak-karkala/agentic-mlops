@@ -10,12 +10,14 @@ dependencies = [
     "langgraph",
     "langchain-core",
     "langgraph-checkpoint-postgres",
-    "langgraph-checkpoint-sqlite",  # For local development checkpointing
-    "langgraph-checkpoint",         # For in-memory fallback
+    "langgraph-checkpoint-sqlite", # For local development checkpointing
+    "langgraph-checkpoint", # For in-memory fallback
     "sqlalchemy",
     "alembic",
-    "psycopg2-binary",  # For SQLAlchemy with PostgreSQL
-    "psycopg[binary]",   # For LangGraph PostgresSaver checkpointing
+    "psycopg2-binary", # For SQLAlchemy with PostgreSQL
+    "psycopg[binary]", # For LangGraph PostgresSaver checkpointing
+    "openai>=1.107.1",
+    "backoff>=2.2.1",
 ]
 
 [project.optional-dependencies]
@@ -33,6 +35,7 @@ target-version = "py311"
 
 [tool.pytest.ini_options]
 addopts = "-q"
+asyncio_mode = "auto"
 markers = [
     "integration: marks tests as integration tests",
 ]
