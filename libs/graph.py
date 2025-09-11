@@ -7,7 +7,9 @@ import time
 
 from langgraph.graph import START, END, MessagesState, StateGraph
 from langgraph.pregel import Pregel
+from langgraph.types import interrupt
 from langchain_core.messages import AIMessage, HumanMessage
+from datetime import datetime, timezone
 
 from libs.database import create_appropriate_checkpointer
 from libs.agent_framework import (
@@ -520,18 +522,97 @@ def policy_eval(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
 
 def gate_hitl(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
     """Human-in-the-loop approval gate (interrupt point)."""
-    # This will be an interrupt point in the actual implementation
-    # For now, just pass through with auto-approval
-    _ = state  # Acknowledge state parameter for future HITL implementation
+    thread_id = state.get("decision_set_id") or state.get("project_id") or "unknown"
+    logger.info("Node start: gate_hitl", extra={"thread_id": thread_id})
 
-    hitl = {
-        "status": "approved",
-        "comment": "Auto-approved for testing",
-        "timestamp": "2025-01-01T00:00:00Z",
+    # Check if we already have approval/rejection from a previous resume
+    existing_hitl = state.get("hitl", {})
+    if existing_hitl.get("status") in ["approved", "rejected"]:
+        logger.info(
+            f"Node complete: gate_hitl {existing_hitl['status']}",
+            extra={"thread_id": thread_id, "status": existing_hitl["status"]},
+        )
+        return {}
+
+    # Prepare the interruption payload with plan summary for human review
+    plan = state.get("plan", {})
+    cost_estimate = state.get("cost_estimate", {})
+    tech_critique = state.get("tech_critique", {})
+    policy_results = state.get("policy_validation", state.get("policy", {}))
+
+    interruption_payload = {
+        "status": "pending_approval",
+        "plan_summary": {
+            "pattern_name": plan.get("pattern_name", "Unknown Pattern"),
+            "architecture_type": plan.get("architecture_type", "unknown"),
+            "estimated_cost": plan.get(
+                "estimated_monthly_cost", cost_estimate.get("monthly_usd", 0)
+            ),
+            "key_services": plan.get("key_services", {}),
+            "implementation_phases": plan.get("implementation_phases", []),
+        },
+        "technical_analysis": {
+            "feasibility_score": tech_critique.get("overall_feasibility_score", 0.0),
+            "key_risks": tech_critique.get("technical_risks", [])[:3],
+            "recommendations": tech_critique.get("recommendations", [])[:3],
+        },
+        "cost_analysis": {
+            "monthly_cost": cost_estimate.get("estimated_monthly_cost", 0),
+            "primary_drivers": cost_estimate.get("primary_cost_drivers", [])[:3],
+            "budget_status": cost_estimate.get("budget_compliance_status", "unknown"),
+        },
+        "policy_analysis": {
+            "overall_status": policy_results.get(
+                "overall_compliance_status", "unknown"
+            ),
+            "critical_violations": policy_results.get("critical_violations", []),
+            "warnings": policy_results.get("warnings", []),
+        },
+        "message": "Please review the proposed MLOps architecture and provide your approval decision.",
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
 
-    logging.getLogger(__name__).info("Node pass-through: gate_hitl auto-approved")
-    return {"hitl": hitl}
+    # Interrupt and wait for human input
+    logger.info(
+        "Node interrupt: gate_hitl waiting for approval",
+        extra={
+            "thread_id": thread_id,
+            "pattern": plan.get("pattern_name", "unknown"),
+            "cost": interruption_payload["plan_summary"]["estimated_cost"],
+        },
+    )
+
+    # The interrupt will pause execution here and return control to the caller
+    # When resumed, the approval_data will contain the human decision
+    approval_data = interrupt(interruption_payload)
+
+    # Process the human approval/rejection decision
+    if approval_data is None:
+        # Fallback case - auto-approve for testing
+        approval_data = {
+            "decision": "approved",
+            "comment": "Auto-approved (no human input received)",
+            "approved_by": "system",
+        }
+
+    hitl_result = {
+        "status": approval_data.get("decision", "approved"),
+        "comment": approval_data.get("comment", ""),
+        "approved_by": approval_data.get("approved_by", "unknown"),
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "approval_data": approval_data,
+    }
+
+    logger.info(
+        f"Node complete: gate_hitl {hitl_result['status']}",
+        extra={
+            "thread_id": thread_id,
+            "status": hitl_result["status"],
+            "approved_by": hitl_result["approved_by"],
+        },
+    )
+
+    return {"hitl": hitl_result}
 
 
 def codegen(state: MLOpsWorkflowState) -> MLOpsWorkflowState:

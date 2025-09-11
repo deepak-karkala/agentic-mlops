@@ -15,7 +15,8 @@ import time
 from libs.graph import build_full_graph, build_thin_graph
 from libs.job_service import JobService, create_decision_set_for_thread
 from libs.database import create_database_engine, create_session_maker
-from libs.models import JobStatus, Job
+from libs.models import JobStatus, Job, DecisionSet
+from langgraph.types import Command
 
 app = FastAPI()
 
@@ -94,6 +95,20 @@ class JobStatusResponse(BaseModel):
     status: JobStatus
     decision_set_id: str
     thread_id: str
+
+
+class ApprovalRequest(BaseModel):
+    decision: Literal["approved", "rejected"]
+    comment: Optional[str] = None
+    approved_by: Optional[str] = None
+
+
+class ApprovalResponse(BaseModel):
+    success: bool
+    message: str
+    decision_set_id: str
+    thread_id: str
+    approval_status: str
 
 
 # Select graph based on env flag, with safe fallback
@@ -298,3 +313,93 @@ def get_job_status(job_id: str, db: Session = Depends(get_db)) -> JobStatusRespo
         decision_set_id=job.decision_set_id,
         thread_id=job.decision_set.thread_id,
     )
+
+
+@app.post(
+    "/api/decision-sets/{decision_set_id}/approve", response_model=ApprovalResponse
+)
+def approve_plan(
+    decision_set_id: str,
+    req: ApprovalRequest,
+    db: Session = Depends(get_db),
+    request: Request = None,
+) -> ApprovalResponse:
+    """
+    Approve or reject a plan and resume the workflow execution.
+
+    This endpoint handles human-in-the-loop approval decisions by:
+    - Validating the decision set exists
+    - Finding the associated thread_id
+    - Resuming graph execution with the approval decision
+    """
+    start = time.time()
+    logger.info(
+        f"POST /api/decision-sets/{decision_set_id}/approve received",
+        extra={
+            "decision_set_id": decision_set_id,
+            "decision": req.decision,
+            "client": request.client.host if request and request.client else None,
+        },
+    )
+
+    try:
+        # Find the decision set to get the thread_id
+        decision_set = (
+            db.query(DecisionSet).filter(DecisionSet.id == decision_set_id).first()
+        )
+        if not decision_set:
+            logger.warning(
+                "Decision set not found", extra={"decision_set_id": decision_set_id}
+            )
+            raise HTTPException(status_code=404, detail="Decision set not found")
+
+        thread_id = decision_set.thread_id
+
+        # Prepare the approval data to resume the graph
+        approval_data = {
+            "decision": req.decision,
+            "comment": req.comment or "",
+            "approved_by": req.approved_by or "anonymous",
+            "timestamp": time.time(),
+        }
+
+        # Resume the graph execution with the approval decision using Command
+        config = {"configurable": {"thread_id": thread_id}}
+
+        # Use Command(resume=approval_data) to resume from interrupt
+        resume_command = Command(resume=approval_data)
+        result = _graph.invoke(resume_command, config=config)
+
+        # Check if the graph execution completed successfully
+        hitl_status = result.get("hitl", {})
+        final_status = hitl_status.get("status", "unknown")
+
+        logger.info(
+            f"Plan approval processed: {req.decision}",
+            extra={
+                "decision_set_id": decision_set_id,
+                "thread_id": thread_id,
+                "decision": req.decision,
+                "final_status": final_status,
+                "duration_ms": int((time.time() - start) * 1000),
+            },
+        )
+
+        return ApprovalResponse(
+            success=True,
+            message=f"Plan {req.decision} successfully. Workflow resumed.",
+            decision_set_id=decision_set_id,
+            thread_id=thread_id,
+            approval_status=final_status,
+        )
+
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
+    except Exception as e:
+        logger.exception(
+            f"POST /api/decision-sets/{decision_set_id}/approve failed",
+            extra={"decision_set_id": decision_set_id, "error": str(e)},
+        )
+        raise HTTPException(
+            status_code=500, detail=f"Failed to process approval: {str(e)}"
+        )
