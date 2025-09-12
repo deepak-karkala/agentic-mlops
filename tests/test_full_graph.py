@@ -505,6 +505,7 @@ class TestFullMLOpsGraph:
         assert hasattr(graph, "invoke")
         assert hasattr(graph, "stream")
 
+    @pytest.mark.slow
     def test_full_workflow_execution(self, mock_llm_client):
         """Test that the full workflow executes correctly with real agents."""
         graph = build_full_graph()
@@ -620,6 +621,7 @@ class TestFullMLOpsGraph:
         assert "files_added" in diff_summary
         assert "cost_delta_usd" in diff_summary
 
+    @pytest.mark.slow
     def test_agent_reason_cards_structure(self, mock_llm_client):
         """Test that reason cards have the expected structure and content."""
         graph = build_full_graph()
@@ -673,6 +675,7 @@ class TestFullMLOpsGraph:
             assert "outputs" in card
             assert isinstance(card["outputs"], dict)
 
+    @pytest.mark.slow
     def test_planner_agent_integration(self, mock_llm_client):
         """Test that the planner agent integration works correctly."""
         graph = build_full_graph()
@@ -721,6 +724,7 @@ class TestFullMLOpsGraph:
         assert "estimated_cost" in planner_card["outputs"]
         assert "services_count" in planner_card["outputs"]
 
+    @pytest.mark.slow
     def test_critics_integration(self, mock_llm_client):
         """Test that both critic agents integrate correctly."""
         graph = build_full_graph()
@@ -759,6 +763,7 @@ class TestFullMLOpsGraph:
             assert "cost" in item
             assert isinstance(item["cost"], (int, float))
 
+    @pytest.mark.slow
     def test_policy_engine_integration(self, mock_llm_client):
         """Test that the policy engine integration works correctly."""
         graph = build_full_graph()
@@ -801,6 +806,7 @@ class TestFullMLOpsGraph:
         for expected_rule in expected_rules:
             assert expected_rule in rule_names
 
+    @pytest.mark.slow
     def test_error_handling(self, mock_llm_client):
         """Test that the workflow handles errors gracefully."""
         graph = build_full_graph()
@@ -824,6 +830,7 @@ class TestFullMLOpsGraph:
             # If there are errors, they should be strings
             assert isinstance(result["error"], str)
 
+    @pytest.mark.slow
     def test_workflow_determinism(self, mock_llm_client):
         """Test that the workflow produces consistent results for the same input."""
         graph = build_full_graph()

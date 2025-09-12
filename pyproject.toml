@@ -18,6 +18,8 @@ dependencies = [
     "psycopg[binary]", # For LangGraph PostgresSaver checkpointing
     "openai>=1.107.1",
     "backoff>=2.2.1",
+    "claude-code-sdk", # Claude Code SDK for code generation
+    "boto3>=1.26.0", # AWS SDK for S3 operations
 ]
 
 [project.optional-dependencies]
@@ -38,4 +40,5 @@ addopts = "-q"
 asyncio_mode = "auto"
 markers = [
     "integration: marks tests as integration tests",
+    "slow: marks tests as slow-running integration tests (can be skipped with -m 'not slow')",
 ]
