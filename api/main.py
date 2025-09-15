@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import os
+import signal
 import uuid
+from contextlib import contextmanager
 from typing import List, Literal, Optional
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -12,11 +16,14 @@ from sqlalchemy.orm import Session
 import logging
 import time
 
-from libs.graph import build_full_graph, build_thin_graph
+from libs.graph import build_full_graph, build_thin_graph, build_streaming_test_graph
 from libs.job_service import JobService, create_decision_set_for_thread
 from libs.database import create_database_engine, create_session_maker
 from libs.models import JobStatus, Job, DecisionSet
 from langgraph.types import Command
+
+# Load environment variables from .env file
+load_dotenv()
 
 app = FastAPI()
 
@@ -112,13 +119,19 @@ class ApprovalResponse(BaseModel):
 
 
 # Select graph based on env flag, with safe fallback
+# Support both legacy USE_FULL_GRAPH and new GRAPH_TYPE environment variables
 USE_FULL_GRAPH = os.getenv("USE_FULL_GRAPH", "false").lower() in {"1", "true", "yes"}
+GRAPH_TYPE = os.getenv("GRAPH_TYPE", "thin").lower()
+
 try:
-    if USE_FULL_GRAPH:
-        logger.info("Initializing full graph (USE_FULL_GRAPH=true)")
+    if GRAPH_TYPE == "full" or USE_FULL_GRAPH:
+        logger.info("Initializing full graph with agent reasoning and streaming")
         _graph = build_full_graph()
+    elif GRAPH_TYPE == "streaming_test":
+        logger.info("Initializing streaming test graph with only intake_extract agent")
+        _graph = build_streaming_test_graph()
     else:
-        logger.info("Initializing thin graph (default)")
+        logger.info("Initializing thin graph for fast development")
         _graph = build_thin_graph()
 except Exception as e:
     logger.warning(
@@ -403,3 +416,593 @@ def approve_plan(
         raise HTTPException(
             status_code=500, detail=f"Failed to process approval: {str(e)}"
         )
+
+
+@app.get("/api/streams/{decision_set_id}")
+async def stream_workflow_progress(decision_set_id: str, db: Session = Depends(get_db)):
+    """
+    Stream real-time workflow progress and reason cards via Server-Sent Events (SSE).
+
+    This endpoint provides live updates during MLOps workflow execution including:
+    - Node start/completion events
+    - Reason cards from agents
+    - Error notifications
+    - Heartbeat messages to keep connection alive
+
+    Usage:
+        const eventSource = new EventSource(`/api/streams/${decision_set_id}`);
+        eventSource.addEventListener('reason-card', handleReasonCard);
+        eventSource.addEventListener('node-complete', handleNodeComplete);
+    """
+    from sse_starlette.sse import EventSourceResponse
+    from libs.streaming_service import get_streaming_service
+
+    logger.info(f"SSE connection established for decision_set_id: {decision_set_id}")
+
+    # Verify decision set exists
+    decision_set = (
+        db.query(DecisionSet).filter(DecisionSet.id == decision_set_id).first()
+    )
+    if not decision_set:
+        logger.warning(f"Decision set not found: {decision_set_id}")
+        raise HTTPException(status_code=404, detail="Decision set not found")
+
+    # Get the streaming service instance
+    streaming_service = get_streaming_service()
+
+    async def event_generator():
+        """Generate streaming events for the workflow using StreamingService.
+
+        Important: Yield dicts with explicit "event" and JSON-encoded "data" so
+        sse_starlette formats named events correctly. Do NOT yield preformatted
+        SSE strings here, or the middleware will wrap them as data-only messages
+        and custom event listeners (e.g., 'reason-card') will never fire on the
+        client.
+        """
+        try:
+            import json as _json
+
+            logger.info(
+                f"Starting SSE event generator for decision_set_id: {decision_set_id}"
+            )
+            event_count = 0
+            # Subscribe to the streaming service for this decision set
+            async for event in streaming_service.subscribe(decision_set_id):
+                event_count += 1
+
+                # Build payload expected by the frontend hook
+                payload = {
+                    "type": event.event_type.value,
+                    "decision_set_id": event.decision_set_id,
+                    "timestamp": event.timestamp.isoformat(),
+                    "data": event.data,
+                }
+                if event.message:
+                    payload["message"] = event.message
+
+                out = {"event": event.event_type.value, "data": _json.dumps(payload)}
+                logger.info(
+                    f"SSE yielding event #{event_count}: {event.event_type}"
+                )
+                yield out
+
+        except asyncio.CancelledError:
+            logger.info(
+                f"SSE connection cancelled for decision_set_id: {decision_set_id}"
+            )
+            raise
+        except Exception as e:
+            logger.exception(
+                f"SSE stream error for decision_set_id: {decision_set_id}"
+            )
+            # Try to emit an error event through the streaming service
+            await streaming_service.emit_error(
+                decision_set_id, f"Stream error: {str(e)}"
+            )
+
+    return EventSourceResponse(
+        event_generator(),
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",  # Configure based on your CORS policy
+        },
+    )
+
+
+@app.post("/api/streams/{decision_set_id}/emit")
+async def emit_streaming_event(
+    decision_set_id: str,
+    event_data: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    Endpoint for worker to emit streaming events to connected SSE clients.
+
+    This allows the worker process to send events to the API server's streaming service
+    so they reach the frontend SSE connections.
+    """
+    from libs.streaming_service import get_streaming_service
+    from libs.streaming_models import StreamEvent, StreamEventType, create_reason_card
+
+    streaming_service = get_streaming_service()
+
+    try:
+        event_type = event_data.get("event_type")
+
+        if event_type == "reason_card":
+            # Create and emit reason card
+            reason_card = create_reason_card(
+                agent=event_data.get("agent", "unknown"),
+                node=event_data.get("node", "unknown"),
+                decision_set_id=decision_set_id,
+                reasoning=event_data.get("reasoning", ""),
+                decision=event_data.get("decision", ""),
+                category=event_data.get("category", "unknown"),
+                confidence=event_data.get("confidence", 0.5),
+                inputs=event_data.get("inputs", {}),
+                outputs=event_data.get("outputs", {}),
+                alternatives_considered=event_data.get("alternatives_considered", []),
+                priority=event_data.get("priority", "medium")
+            )
+            await streaming_service.emit_reason_card(reason_card)
+
+        elif event_type == "node_start":
+            await streaming_service.emit_node_start(
+                decision_set_id,
+                event_data.get("node_name", "unknown"),
+                event_data.get("message", "")
+            )
+
+        elif event_type == "node_complete":
+            await streaming_service.emit_node_complete(
+                decision_set_id,
+                event_data.get("node_name", "unknown"),
+                event_data.get("outputs", {}),
+                event_data.get("message", "")
+            )
+
+        elif event_type == "error":
+            await streaming_service.emit_error(
+                decision_set_id,
+                event_data.get("message", "Unknown error")
+            )
+
+        return {"status": "success", "message": "Event emitted"}
+
+    except Exception as e:
+        logger.exception(f"Failed to emit streaming event: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to emit event: {str(e)}")
+
+
+# ============================================================================
+# INTEGRATED WORKER SERVICE
+# ============================================================================
+
+class IntegratedWorkerService:
+    """
+    Integrated worker service that runs in the same process as the API server.
+
+    This provides the benefits of job persistence while eliminating the need
+    for separate worker processes and HTTP-based event streaming.
+    """
+
+    def __init__(self, worker_id: str = None, poll_interval: int = 5, lease_duration: int = 30):
+        self.worker_id = worker_id or f"worker-{uuid.uuid4().hex[:8]}"
+        self.poll_interval = poll_interval  # seconds between job polls
+        self.lease_duration = lease_duration  # minutes to hold job lease
+        self.running = False
+        self.task = None
+
+        # Use the same graph instance as the API server
+        self.graph = _graph
+
+        # Use the same database session maker as the API server
+        self.SessionMaker = SessionMaker
+
+        logger.info(f"Initialized integrated worker {self.worker_id}")
+
+    @contextmanager
+    def get_job_service(self):
+        """Context manager for job service with proper session handling."""
+        session = self.SessionMaker()
+        try:
+            job_service = JobService(session)
+            yield job_service
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Database session error: {e}")
+            raise
+        finally:
+            session.close()
+
+    async def start_background_worker(self):
+        """Start the worker as a background asyncio task."""
+        if self.running:
+            logger.warning("Worker already running")
+            return
+
+        self.running = True
+        self.task = asyncio.create_task(self.run_worker_loop())
+        logger.info(f"Background worker {self.worker_id} started")
+        return self.task
+
+    async def stop_background_worker(self):
+        """Stop the background worker gracefully."""
+        self.running = False
+        if self.task:
+            try:
+                await asyncio.wait_for(self.task, timeout=30.0)
+            except asyncio.TimeoutError:
+                logger.warning("Worker shutdown timed out, cancelling task")
+                self.task.cancel()
+            except Exception as e:
+                logger.error(f"Error stopping worker: {e}")
+        logger.info(f"Background worker {self.worker_id} stopped")
+
+    async def run_worker_loop(self):
+        """Main worker loop that polls for and processes jobs."""
+        consecutive_empty_polls = 0
+        max_empty_polls = 12  # Max empty polls before backing off
+        backoff_multiplier = 2
+        max_backoff = 60  # Maximum backoff in seconds
+
+        logger.info(f"Worker {self.worker_id} loop started")
+
+        while self.running:
+            try:
+                # Try to claim and process a job
+                job_processed = await self.process_next_job()
+
+                if job_processed:
+                    consecutive_empty_polls = 0
+                    # Short delay between jobs
+                    await asyncio.sleep(1)
+                else:
+                    consecutive_empty_polls += 1
+
+                    # Implement exponential backoff when no jobs are available
+                    if consecutive_empty_polls > max_empty_polls:
+                        backoff_time = min(
+                            self.poll_interval
+                            * (
+                                backoff_multiplier
+                                ** (consecutive_empty_polls - max_empty_polls)
+                            ),
+                            max_backoff,
+                        )
+                        logger.debug(
+                            f"No jobs available, backing off for {backoff_time}s"
+                        )
+                        await asyncio.sleep(backoff_time)
+                    else:
+                        await asyncio.sleep(self.poll_interval)
+
+            except Exception as e:
+                logger.error(f"Error in worker loop: {e}")
+                await asyncio.sleep(self.poll_interval)
+
+        logger.info(f"Worker {self.worker_id} loop completed")
+
+    async def process_next_job(self) -> bool:
+        """
+        Claim and process the next available job.
+
+        Returns:
+            True if a job was processed, False if no jobs were available
+        """
+        try:
+            with self.get_job_service() as job_service:
+                # Claim a job using FOR UPDATE SKIP LOCKED
+                job = job_service.claim_job(self.worker_id, self.lease_duration)
+
+                if not job:
+                    return False
+
+                logger.info(f"Claimed job {job.id} of type {job.job_type}")
+
+                try:
+                    # Process the job based on its type
+                    await self.process_job(job)
+
+                    # Mark job as completed
+                    success = job_service.complete_job(job.id, self.worker_id)
+                    if success:
+                        logger.info(f"Successfully completed job {job.id}")
+                    else:
+                        logger.warning(f"Failed to mark job {job.id} as completed")
+
+                    return True
+
+                except Exception as e:
+                    logger.error(f"Job {job.id} failed: {e}")
+
+                    # Mark job as failed (with retry logic)
+                    job_service.fail_job(job.id, self.worker_id, str(e))
+                    return True
+
+        except Exception as e:
+            logger.error(f"Error claiming/processing job: {e}")
+            return False
+
+    async def process_job(self, job: Job):
+        """Process a specific job based on its type."""
+        logger.info(f"Processing job {job.id} of type {job.job_type}")
+
+        if job.job_type == "ml_workflow":
+            await self.process_ml_workflow_job(job)
+        else:
+            raise ValueError(f"Unknown job type: {job.job_type}")
+
+    async def process_ml_workflow_job(self, job: Job):
+        """Process an ML workflow job by running the LangGraph."""
+        payload = job.payload
+        thread_id = payload.get("thread_id")
+        messages = payload.get("messages", [])
+
+        # Use decision_set_id for streaming events (this is what frontend SSE uses)
+        decision_set_id = job.decision_set_id
+
+        if not thread_id:
+            raise ValueError("Job payload missing required thread_id")
+
+        logger.info(f"Processing ML workflow for thread {thread_id}, decision_set {decision_set_id}")
+
+        # Convert messages back to LangChain format
+        from langchain_core.messages import HumanMessage, AIMessage
+
+        lc_messages = []
+        for msg_data in messages:
+            role = msg_data.get("role")
+            content = msg_data.get("content", "")
+
+            if role == "user":
+                lc_messages.append(HumanMessage(content=content))
+            elif role == "assistant":
+                lc_messages.append(AIMessage(content=content))
+            # Add other message types as needed
+
+        state = {"messages": lc_messages}
+        config = {"configurable": {"thread_id": thread_id}}
+
+        # Execute the graph with streaming
+        # Use direct streaming service access (no HTTP bridge needed)
+        from libs.streaming_service import get_streaming_service
+        streaming_service = get_streaming_service()
+
+        try:
+            # Use enhanced multi-mode streaming for richer agent reasoning data
+            # Following LangGraph best practices: combine "updates" and "messages" modes
+            stream_modes = ["updates", "messages"]
+            logger.info(f"Starting LangGraph multi-mode streaming for thread {thread_id}, modes: {stream_modes}, emitting events to decision_set {decision_set_id}")
+
+            for stream_mode, chunk in self.graph.stream(state, config, stream_mode=stream_modes):
+                # Process different stream modes for comprehensive agent insights
+                logger.info(f"Received {stream_mode} stream chunk: {type(chunk)} keys: {list(chunk.keys()) if isinstance(chunk, dict) else 'not-dict'}")
+                await self._process_multi_mode_chunk(stream_mode, chunk, decision_set_id, streaming_service)
+            logger.info(f"LangGraph multi-mode streaming completed for thread {thread_id}")
+        except Exception as stream_error:
+            logger.error(f"Streaming execution failed: {stream_error}")
+            await streaming_service.emit_error(decision_set_id, f"Workflow execution failed: {str(stream_error)}")
+            raise
+
+        # Log the result for now
+        # In the future, this would save results to decision_set, create artifacts, etc.
+        logger.info(f"Graph execution completed for job {job.id}")
+
+        # For now, we'll simulate some processing time
+        await asyncio.sleep(2)
+
+    async def _process_stream_chunk(self, chunk, decision_set_id: str, streaming_service):
+        """
+        Process a single stream chunk from LangGraph and emit appropriate SSE events.
+
+        Args:
+            chunk: Stream chunk from LangGraph (contains node updates)
+            decision_set_id: Decision set ID for routing SSE events
+            streaming_service: Direct streaming service instance (no HTTP needed)
+        """
+        try:
+            logger.debug(f"Processing stream chunk: {chunk}")
+
+            # chunk format: {node_name: node_state_update}
+            for node_name, node_update in chunk.items():
+                logger.info(f"Node update: {node_name} -> {node_update}")
+
+                # Emit node start event
+                await streaming_service.emit_node_start(decision_set_id, node_name, f"Starting {node_name}")
+
+                # Look for reason cards in the node state
+                if hasattr(node_update, 'reason_cards') and node_update.reason_cards:
+                    # Deduplicate reason cards based on content
+                    unique_reason_cards = self._deduplicate_reason_cards(node_update.reason_cards)
+                    logger.info(f"Found {len(node_update.reason_cards)} reason cards, {len(unique_reason_cards)} unique after deduplication")
+                    for reason_card in unique_reason_cards:
+                        await streaming_service.emit_reason_card(reason_card)
+
+                # Look for reason cards in nested state structures
+                elif isinstance(node_update, dict):
+                    reason_cards = node_update.get('reason_cards', [])
+                    logger.info(f"Found {len(reason_cards)} reason cards in dict structure")
+
+                    # Deduplicate reason cards before processing
+                    unique_reason_cards = self._deduplicate_reason_cards(reason_cards)
+                    logger.info(f"After deduplication: {len(unique_reason_cards)} unique reason cards")
+
+                    for i, reason_card in enumerate(unique_reason_cards):
+                        logger.info(f"Processing unique reason card {i+1}: type={type(reason_card)}, has_model_dump={hasattr(reason_card, 'model_dump')}")
+                        if hasattr(reason_card, 'model_dump'):  # Pydantic model
+                            # Emit reason card directly via streaming service
+                            await streaming_service.emit_reason_card(reason_card)
+                        elif isinstance(reason_card, dict):  # Dictionary-based reason card
+                            logger.info(f"Emitting dict-based reason card: {reason_card.get('agent', 'unknown')}")
+                            # Create reason card from dictionary data
+                            from libs.streaming_models import create_reason_card
+                            reason_card_obj = create_reason_card(
+                                agent=reason_card.get('agent', 'unknown'),
+                                node=reason_card.get('node_name', 'unknown'),
+                                decision_set_id=decision_set_id,
+                                reasoning=reason_card.get('outputs', {}).get('extraction_rationale', 'No rationale provided'),
+                                decision=f"Extracted constraints with {reason_card.get('confidence', 0)} confidence",
+                                category="constraint_extraction",
+                                confidence=reason_card.get('confidence', 0.5),
+                                inputs=reason_card.get('inputs', {}),
+                                outputs=reason_card.get('outputs', {}),
+                                alternatives_considered=[],
+                                priority="medium"
+                            )
+                            await streaming_service.emit_reason_card(reason_card_obj)
+                        else:
+                            logger.warning(f"Unknown reason card type: {type(reason_card)}, skipping")
+
+                # Emit node completion
+                await streaming_service.emit_node_complete(decision_set_id, node_name, {}, f"Completed {node_name}")
+
+        except Exception as e:
+            logger.error(f"Error processing stream chunk: {e}")
+            await streaming_service.emit_error(decision_set_id, f"Stream processing error: {str(e)}")
+
+    def _deduplicate_reason_cards(self, reason_cards):
+        """
+        Deduplicate reason cards based on their key content to prevent identical cards.
+
+        Args:
+            reason_cards: List of reason card objects or dictionaries
+
+        Returns:
+            List of unique reason cards
+        """
+        if not reason_cards:
+            return []
+
+        seen_cards = set()
+        unique_cards = []
+
+        for card in reason_cards:
+            # Create a hash key based on the card's content
+            if hasattr(card, 'model_dump'):  # Pydantic model
+                # Use key fields to create a unique identifier
+                key = (
+                    card.agent,
+                    card.node_name,
+                    card.trigger,
+                    str(card.inputs),
+                    str(card.outputs),
+                    card.confidence
+                )
+            elif isinstance(card, dict):  # Dictionary-based reason card
+                # Use key fields to create a unique identifier
+                key = (
+                    card.get('agent', ''),
+                    card.get('node_name', ''),
+                    card.get('trigger', ''),
+                    str(card.get('inputs', {})),
+                    str(card.get('outputs', {})),
+                    card.get('confidence', 0)
+                )
+            else:
+                # Fallback: convert to string
+                key = str(card)
+
+            if key not in seen_cards:
+                seen_cards.add(key)
+                unique_cards.append(card)
+            else:
+                logger.info(f"Skipping duplicate reason card with key: {key[:100]}...")
+
+        return unique_cards
+
+    async def _process_multi_mode_chunk(self, stream_mode: str, chunk, decision_set_id: str, streaming_service):
+        """
+        Process LangGraph multi-mode stream chunks for enhanced agent reasoning.
+
+        Args:
+            stream_mode: The streaming mode ("updates", "messages", etc.)
+            chunk: Stream chunk data specific to the mode
+            decision_set_id: Decision set ID for routing SSE events
+            streaming_service: Direct streaming service instance
+        """
+        try:
+            logger.debug(f"Processing {stream_mode} stream chunk: {chunk}")
+
+            if stream_mode == "updates":
+                # Process node state updates (contains reason cards and node execution info)
+                await self._process_stream_chunk(chunk, decision_set_id, streaming_service)
+
+            elif stream_mode == "messages":
+                # Process LLM message streams (contains token-level reasoning)
+                await self._process_message_chunk(chunk, decision_set_id, streaming_service)
+
+            else:
+                logger.debug(f"Unhandled stream mode: {stream_mode}")
+
+        except Exception as e:
+            logger.error(f"Error processing {stream_mode} stream chunk: {e}")
+            await streaming_service.emit_error(decision_set_id, f"Stream processing error in {stream_mode} mode: {str(e)}")
+
+    async def _process_message_chunk(self, chunk, decision_set_id: str, streaming_service):
+        """
+        Process LLM message chunks for token-level reasoning insights.
+
+        Args:
+            chunk: Message chunk from LangGraph message streaming
+            decision_set_id: Decision set ID for routing SSE events
+            streaming_service: Direct streaming service instance
+        """
+        try:
+            # Message chunks provide token-level LLM reasoning
+            # These can be used for real-time thinking displays
+
+            if isinstance(chunk, dict):
+                # Extract message metadata for live reasoning display
+                message_data = {
+                    "type": "llm_reasoning",
+                    "timestamp": chunk.get("timestamp"),
+                    "content": chunk.get("content", ""),
+                    "tokens": chunk.get("tokens", 0),
+                    "model": chunk.get("model", "unknown"),
+                }
+
+                # Emit as a generic stream event for advanced UIs
+                from libs.streaming_models import StreamEvent, StreamEventType
+                event = StreamEvent(
+                    event_type=StreamEventType.NODE_START,  # Reuse for now
+                    decision_set_id=decision_set_id,
+                    data=message_data,
+                    message=f"LLM reasoning: {message_data['content'][:100]}..."
+                )
+                await streaming_service.emit_event(event)
+
+        except Exception as e:
+            logger.error(f"Error processing message chunk: {e}")
+
+
+# Global worker instance
+_worker_service = None
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize and start the integrated worker service on API startup."""
+    global _worker_service
+
+    logger.info("Starting integrated API + Worker server")
+
+    # Initialize and start the integrated worker
+    _worker_service = IntegratedWorkerService()
+    await _worker_service.start_background_worker()
+
+    logger.info("Integrated API + Worker server started successfully")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Gracefully shutdown the integrated worker service on API shutdown."""
+    global _worker_service
+
+    logger.info("Shutting down integrated API + Worker server")
+
+    if _worker_service:
+        await _worker_service.stop_background_worker()
+
+    logger.info("Integrated API + Worker server shutdown complete")

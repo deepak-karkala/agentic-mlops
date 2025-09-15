@@ -20,6 +20,8 @@ dependencies = [
     "backoff>=2.2.1",
     "claude-code-sdk", # Claude Code SDK for code generation
     "boto3>=1.26.0", # AWS SDK for S3 operations
+    "sse-starlette>=2.0.0", # Server-Sent Events for streaming
+    "httpx>=0.28.1",
 ]
 
 [project.optional-dependencies]

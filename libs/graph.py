@@ -30,6 +30,27 @@ from libs.llm_policy_engine_agent import create_llm_policy_engine_agent
 logger = logging.getLogger(__name__)
 
 
+def _safe_async_run(coro):
+    """Safely run async coroutine, handling event loop conflicts."""
+    import concurrent.futures
+    import threading
+
+    try:
+        # Try to get the current loop
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # We're in an async context, run in a separate thread
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(asyncio.run, coro)
+                return future.result()
+        else:
+            # No running loop, use the existing one
+            return loop.run_until_complete(coro)
+    except RuntimeError:
+        # No event loop, create a new one
+        return asyncio.run(coro)
+
+
 class ChatMessage(TypedDict):
     """Simplified message format for API serialization."""
 
@@ -96,7 +117,7 @@ def intake_extract(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
 
     try:
         # Execute agent directly with MLOpsWorkflowState - no conversion needed
-        result = asyncio.run(intake_extract_agent.execute(state, TriggerType.INITIAL))
+        result = _safe_async_run(intake_extract_agent.execute(state, TriggerType.INITIAL))
 
         if result.success:
             # Extract state updates from the agent result
@@ -148,7 +169,7 @@ def coverage_check(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
 
     try:
         # Execute agent directly with MLOpsWorkflowState - no conversion needed
-        result = asyncio.run(coverage_check_agent.execute(state, TriggerType.INITIAL))
+        result = _safe_async_run(coverage_check_agent.execute(state, TriggerType.INITIAL))
 
         if result.success:
             # Extract state updates from the agent result
@@ -244,9 +265,7 @@ def adaptive_questions(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
 
     try:
         # Execute agent directly with MLOpsWorkflowState - no conversion needed
-        result = asyncio.run(
-            adaptive_questions_agent.execute(state, TriggerType.INITIAL)
-        )
+        result = _safe_async_run(adaptive_questions_agent.execute(state, TriggerType.INITIAL))
 
         if result.success:
             # Extract state updates from the agent result
@@ -294,21 +313,55 @@ def adaptive_questions(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
 
 def planner(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
     """Compose capability patterns into a candidate plan using LLM-powered PlannerAgent."""
+    from libs.streaming_models import StreamWriter, create_reason_card
+    from libs.streaming_service import get_streaming_service
+
     _, _, _, llm_planner_agent, _, _, _ = _get_llm_agents()
 
     start = time.time()
     thread_id = state.get("decision_set_id") or state.get("project_id") or "unknown"
     logger.info("Node start: planner", extra={"thread_id": thread_id})
 
+    # Get streaming service and emit node start (skip async call to avoid event loop issues)
+    streaming_service = get_streaming_service()
+    # asyncio.create_task() causes event loop issues in executor context
+    # streaming_service.emit_node_start() will be handled by the worker's async context
+
+    # Initialize streaming writer (for backward compatibility with state)
+    stream_writer = StreamWriter(thread_id)
+    stream_writer.emit_node_start(
+        "planner", "Analyzing requirements and selecting MLOps patterns"
+    )
+
     try:
         # Execute agent directly with MLOpsWorkflowState - no conversion needed
-        result = asyncio.run(llm_planner_agent.execute(state, TriggerType.INITIAL))
+        result = _safe_async_run(llm_planner_agent.execute(state, TriggerType.INITIAL))
 
         if result.success:
             # Extract state updates from the agent result
             state_updates = result.state_updates
 
-            # Store reason card
+            # Create streaming reason card from agent result
+            streaming_reason_card = create_reason_card(
+                agent="planner",
+                node="planner",
+                decision_set_id=thread_id,
+                reasoning=result.reason_card.reasoning,
+                decision=result.reason_card.decision,
+                category="pattern-selection",
+                confidence=result.reason_card.confidence,
+                inputs=result.reason_card.inputs,
+                outputs=result.reason_card.outputs,
+                alternatives_considered=result.reason_card.alternatives_considered,
+                priority="high",
+            )
+
+            # Emit the reason card via streaming service
+            _safe_async_run(
+                streaming_service.emit_reason_card(streaming_reason_card)
+            )
+
+            # Store reason card in state (for backward compatibility)
             reason_cards = state.get("reason_cards", [])
             reason_cards.append(result.reason_card.model_dump())
 
@@ -320,6 +373,23 @@ def planner(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
             plan = state_updates.get("plan", {})
             selected_pattern_id = plan.get("pattern_id", "unknown")
 
+            # Emit node completion via streaming service
+            asyncio.create_task(
+                streaming_service.emit_node_complete(
+                    thread_id,
+                    "planner",
+                    outputs=result.reason_card.outputs,
+                    message=f"Selected pattern: {selected_pattern_id}",
+                )
+            )
+
+            # Also emit to stream writer (for backward compatibility)
+            stream_writer.emit_node_complete(
+                "planner",
+                outputs=result.reason_card.outputs,
+                message=f"Selected pattern: {selected_pattern_id}",
+            )
+
             out = {
                 **state_updates,
                 "selected_pattern_id": selected_pattern_id,  # Legacy compatibility
@@ -329,6 +399,7 @@ def planner(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
                     **state.get("agent_outputs", {}),
                     "planner": result.reason_card.outputs,
                 },
+                "streaming_events": stream_writer.get_events(),  # Include streaming events in state
             }
             logger.info(
                 "Node success: planner",
@@ -341,26 +412,61 @@ def planner(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
             return out
         else:
             # Agent failed - return error state
+            asyncio.create_task(
+                streaming_service.emit_error(
+                    thread_id, f"Planner failed: {result.error_message}", "planner"
+                )
+            )
+            stream_writer.emit_error(
+                f"Planner failed: {result.error_message}", "planner"
+            )
+
             logger.warning(
                 "Node failure: planner",
                 extra={"thread_id": thread_id, "error": result.error_message},
             )
-            return {"plan": {}, "error": result.error_message}
+            return {
+                "plan": {},
+                "error": result.error_message,
+                "streaming_events": stream_writer.get_events(),
+            }
 
     except Exception as e:
+        asyncio.create_task(
+            streaming_service.emit_error(
+                thread_id, f"Planner exception: {str(e)}", "planner"
+            )
+        )
+        stream_writer.emit_error(f"Planner exception: {str(e)}", "planner")
+
         logger.exception(
             "Node exception: planner", extra={"thread_id": thread_id, "error": str(e)}
         )
-        return {"plan": {}, "error": f"Planner agent failed: {str(e)}"}
+        return {
+            "plan": {},
+            "error": f"Planner agent failed: {str(e)}",
+            "streaming_events": stream_writer.get_events(),
+        }
 
 
 def critic_tech(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
     """Analyze feasibility, coupling, bottlenecks using LLM-powered TechCriticAgent."""
+    from libs.streaming_models import create_reason_card
+    from libs.streaming_service import get_streaming_service
+
     _, _, _, _, llm_tech_critic_agent, _, _ = _get_llm_agents()
 
     start = time.time()
     thread_id = state.get("decision_set_id") or state.get("project_id") or "unknown"
     logger.info("Node start: critic_tech", extra={"thread_id": thread_id})
+
+    # Get streaming service and emit node start
+    streaming_service = get_streaming_service()
+    asyncio.create_task(
+        streaming_service.emit_node_start(
+            thread_id, "critic_tech", "Analyzing technical feasibility and architecture"
+        )
+    )
 
     try:
         # Execute agent directly with MLOpsWorkflowState - no conversion needed
@@ -370,6 +476,24 @@ def critic_tech(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
             # Extract state updates from the agent result
             state_updates = result.state_updates
 
+            # Create and emit streaming reason card
+            streaming_reason_card = create_reason_card(
+                agent="tech_critic",
+                node="critic_tech",
+                decision_set_id=thread_id,
+                reasoning=result.reason_card.reasoning,
+                decision=result.reason_card.decision,
+                category="technical-analysis",
+                confidence=result.reason_card.confidence,
+                inputs=result.reason_card.inputs,
+                outputs=result.reason_card.outputs,
+                alternatives_considered=result.reason_card.alternatives_considered,
+                priority="high",
+            )
+            _safe_async_run(
+                streaming_service.emit_reason_card(streaming_reason_card)
+            )
+
             # Store reason card
             reason_cards = state.get("reason_cards", [])
             reason_cards.append(result.reason_card.model_dump())
@@ -377,6 +501,16 @@ def critic_tech(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
             # Update execution order
             execution_order = state.get("execution_order", [])
             execution_order.append("critic_tech")
+
+            # Emit node completion
+            asyncio.create_task(
+                streaming_service.emit_node_complete(
+                    thread_id,
+                    "critic_tech",
+                    outputs=result.reason_card.outputs,
+                    message="Technical analysis completed",
+                )
+            )
 
             out = {
                 **state_updates,
@@ -396,9 +530,21 @@ def critic_tech(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
             )
             return out
         else:
+            asyncio.create_task(
+                streaming_service.emit_error(
+                    thread_id,
+                    f"Tech critic failed: {result.error_message}",
+                    "critic_tech",
+                )
+            )
             return {"tech_critique": {}, "error": result.error_message}
 
     except Exception as e:
+        asyncio.create_task(
+            streaming_service.emit_error(
+                thread_id, f"Tech critic exception: {str(e)}", "critic_tech"
+            )
+        )
         logger.exception(
             "Node exception: critic_tech",
             extra={"thread_id": thread_id, "error": str(e)},
@@ -408,11 +554,24 @@ def critic_tech(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
 
 def critic_cost(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
     """Generate coarse BOM and monthly estimate using LLM-powered CostCriticAgent."""
+    from libs.streaming_models import create_reason_card
+    from libs.streaming_service import get_streaming_service
+
     _, _, _, _, _, llm_cost_critic_agent, _ = _get_llm_agents()
 
     start = time.time()
     thread_id = state.get("decision_set_id") or state.get("project_id") or "unknown"
     logger.info("Node start: critic_cost", extra={"thread_id": thread_id})
+
+    # Get streaming service and emit node start
+    streaming_service = get_streaming_service()
+    asyncio.create_task(
+        streaming_service.emit_node_start(
+            thread_id,
+            "critic_cost",
+            "Analyzing cost estimates and resource requirements",
+        )
+    )
 
     try:
         # Execute agent directly with MLOpsWorkflowState - no conversion needed
@@ -422,6 +581,24 @@ def critic_cost(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
             # Extract state updates from the agent result
             state_updates = result.state_updates
 
+            # Create and emit streaming reason card
+            streaming_reason_card = create_reason_card(
+                agent="cost_critic",
+                node="critic_cost",
+                decision_set_id=thread_id,
+                reasoning=result.reason_card.reasoning,
+                decision=result.reason_card.decision,
+                category="cost-analysis",
+                confidence=result.reason_card.confidence,
+                inputs=result.reason_card.inputs,
+                outputs=result.reason_card.outputs,
+                alternatives_considered=result.reason_card.alternatives_considered,
+                priority="high",
+            )
+            _safe_async_run(
+                streaming_service.emit_reason_card(streaming_reason_card)
+            )
+
             # Store reason card
             reason_cards = state.get("reason_cards", [])
             reason_cards.append(result.reason_card.model_dump())
@@ -429,6 +606,18 @@ def critic_cost(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
             # Update execution order
             execution_order = state.get("execution_order", [])
             execution_order.append("critic_cost")
+
+            # Emit node completion
+            cost_estimate = state_updates.get("cost_estimate", {})
+            estimated_cost = cost_estimate.get("monthly_cost", "unknown")
+            asyncio.create_task(
+                streaming_service.emit_node_complete(
+                    thread_id,
+                    "critic_cost",
+                    outputs=result.reason_card.outputs,
+                    message=f"Cost analysis completed (estimated: ${estimated_cost}/month)",
+                )
+            )
 
             out = {
                 **state_updates,
@@ -451,9 +640,21 @@ def critic_cost(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
             )
             return out
         else:
+            asyncio.create_task(
+                streaming_service.emit_error(
+                    thread_id,
+                    f"Cost critic failed: {result.error_message}",
+                    "critic_cost",
+                )
+            )
             return {"cost_estimate": {}, "error": result.error_message}
 
     except Exception as e:
+        asyncio.create_task(
+            streaming_service.emit_error(
+                thread_id, f"Cost critic exception: {str(e)}", "critic_cost"
+            )
+        )
         logger.exception(
             "Node exception: critic_cost",
             extra={"thread_id": thread_id, "error": str(e)},
@@ -463,10 +664,21 @@ def critic_cost(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
 
 def policy_eval(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
     """Apply governance rules using LLM-powered PolicyEngineAgent."""
+    from libs.streaming_models import create_reason_card
+    from libs.streaming_service import get_streaming_service
+
     _, _, _, _, _, _, llm_policy_engine_agent = _get_llm_agents()
     start = time.time()
     thread_id = state.get("decision_set_id") or state.get("project_id") or "unknown"
     logger.info("Node start: policy_eval", extra={"thread_id": thread_id})
+
+    # Get streaming service and emit node start
+    streaming_service = get_streaming_service()
+    asyncio.create_task(
+        streaming_service.emit_node_start(
+            thread_id, "policy_eval", "Evaluating governance and compliance policies"
+        )
+    )
 
     try:
         # Execute agent directly with MLOpsWorkflowState - no conversion needed
@@ -478,6 +690,24 @@ def policy_eval(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
             # Extract state updates from the agent result
             state_updates = result.state_updates
 
+            # Create and emit streaming reason card
+            streaming_reason_card = create_reason_card(
+                agent="policy_engine",
+                node="policy_eval",
+                decision_set_id=thread_id,
+                reasoning=result.reason_card.reasoning,
+                decision=result.reason_card.decision,
+                category="policy-evaluation",
+                confidence=result.reason_card.confidence,
+                inputs=result.reason_card.inputs,
+                outputs=result.reason_card.outputs,
+                alternatives_considered=result.reason_card.alternatives_considered,
+                priority="critical",
+            )
+            _safe_async_run(
+                streaming_service.emit_reason_card(streaming_reason_card)
+            )
+
             # Store reason card
             reason_cards = state.get("reason_cards", [])
             reason_cards.append(result.reason_card.model_dump())
@@ -485,6 +715,18 @@ def policy_eval(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
             # Update execution order
             execution_order = state.get("execution_order", [])
             execution_order.append("policy_eval")
+
+            # Emit node completion
+            policy_validation = state_updates.get("policy_validation", {})
+            validation_status = policy_validation.get("status", "unknown")
+            asyncio.create_task(
+                streaming_service.emit_node_complete(
+                    thread_id,
+                    "policy_eval",
+                    outputs=result.reason_card.outputs,
+                    message=f"Policy evaluation completed (status: {validation_status})",
+                )
+            )
 
             out = {
                 **state_updates,
@@ -510,9 +752,21 @@ def policy_eval(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
             )
             return out
         else:
+            asyncio.create_task(
+                streaming_service.emit_error(
+                    thread_id,
+                    f"Policy engine failed: {result.error_message}",
+                    "policy_eval",
+                )
+            )
             return {"policy_results": {}, "error": result.error_message}
 
     except Exception as e:
+        asyncio.create_task(
+            streaming_service.emit_error(
+                thread_id, f"Policy engine exception: {str(e)}", "policy_eval"
+            )
+        )
         logger.exception(
             "Node exception: policy_eval",
             extra={"thread_id": thread_id, "error": str(e)},
@@ -522,8 +776,18 @@ def policy_eval(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
 
 def gate_hitl(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
     """Human-in-the-loop approval gate (interrupt point)."""
+    from libs.streaming_service import get_streaming_service
+
     thread_id = state.get("decision_set_id") or state.get("project_id") or "unknown"
     logger.info("Node start: gate_hitl", extra={"thread_id": thread_id})
+
+    # Get streaming service and emit node start
+    streaming_service = get_streaming_service()
+    asyncio.create_task(
+        streaming_service.emit_node_start(
+            thread_id, "gate_hitl", "Preparing plan for human review"
+        )
+    )
 
     # Check if we already have approval/rejection from a previous resume
     existing_hitl = state.get("hitl", {})
@@ -572,6 +836,15 @@ def gate_hitl(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
         "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
 
+    # Emit workflow paused event before interrupting
+    asyncio.create_task(
+        streaming_service.emit_workflow_paused(
+            thread_id,
+            "Waiting for human approval of the proposed MLOps architecture",
+            "gate_hitl",
+        )
+    )
+
     # Interrupt and wait for human input
     logger.info(
         "Node interrupt: gate_hitl waiting for approval",
@@ -602,6 +875,19 @@ def gate_hitl(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
         "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "approval_data": approval_data,
     }
+
+    # Emit node completion with approval decision
+    asyncio.create_task(
+        streaming_service.emit_node_complete(
+            thread_id,
+            "gate_hitl",
+            outputs={
+                "decision": hitl_result["status"],
+                "approved_by": hitl_result["approved_by"],
+            },
+            message=f"Human approval gate completed: {hitl_result['status']} by {hitl_result['approved_by']}",
+        )
+    )
 
     logger.info(
         f"Node complete: gate_hitl {hitl_result['status']}",
@@ -939,6 +1225,38 @@ def build_full_graph() -> Pregel:
         return graph.compile(checkpointer=checkpointer)
     else:
         # No checkpointer available - compile without persistence
+        return graph.compile()
+
+
+def build_streaming_test_graph() -> Pregel:
+    """
+    Build a simplified graph with only the intake_extract agent for streaming testing.
+
+    This creates a minimal graph that runs only the Intake Extract Agent,
+    designed to test LangGraph native streaming capabilities without
+    the complexity of the full workflow.
+
+    Returns:
+        Compiled StateGraph ready for streaming execution
+    """
+    from langgraph.graph import StateGraph, START, END
+
+    graph = StateGraph(MLOpsWorkflowState)
+
+    # Add only the intake extract agent
+    graph.add_node("intake_extract", intake_extract)
+
+    # Simple linear flow: START -> intake_extract -> END
+    graph.add_edge(START, "intake_extract")
+    graph.add_edge("intake_extract", END)
+
+    # Create checkpointer for state persistence
+    checkpointer = create_appropriate_checkpointer()
+
+    # Compile with checkpointer if available
+    if checkpointer:
+        return graph.compile(checkpointer=checkpointer)
+    else:
         return graph.compile()
 
 

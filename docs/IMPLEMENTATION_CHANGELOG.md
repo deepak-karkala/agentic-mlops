@@ -620,6 +620,187 @@ PYTHONPATH=. uv run pytest -v tests/test_job_system.py tests/test_async_api.py
 - **Faster Iteration**: No legacy code slowing down development
 - **Production Ready**: Robust error handling and monitoring built-in
 
+### ✅ Issue #11: Human-in-the-Loop (HITL) Gate with LangGraph interrupts
+**Status**: COMPLETED
+**Epic**: Interactive Workflows
+**Completion Date**: 2025-09-14
+
+#### What Was Implemented
+- [x] LangGraph interrupt mechanism for workflow pausing at critical decision points
+- [x] Human-in-the-loop gate integration with conditional workflow continuation
+- [x] Enhanced graph topology with HITL checkpoints and user interaction support
+- [x] State management for interrupted workflows with resume capability
+- [x] Frontend integration for human review and decision approval
+- [x] Comprehensive testing of interrupt and resume functionality
+
+#### Key Files Created/Modified
+- `libs/graph.py` - Added HITL gate node with LangGraph interrupt integration
+- `libs/agent_framework.py` - Enhanced state schema to support HITL decision tracking
+- `api/main.py` - Added interrupt handling and workflow resume endpoints
+- `tests/test_hitl_functionality.py` - Comprehensive HITL workflow testing
+
+#### Challenges Encountered
+1. **Interrupt State Management**: LangGraph interrupts needed proper state persistence across workflow pauses
+2. **Frontend Integration**: User interface needed to handle workflow interruption and resumption gracefully
+3. **Decision Point Identification**: Determining optimal points for human intervention in automated workflows
+
+#### Solutions Implemented
+1. **LangGraph Interrupt Integration**: Used built-in interrupt mechanism with proper state checkpointing
+2. **Workflow Resume API**: Created endpoints for workflow continuation after human review
+3. **Enhanced State Schema**: Added HITL decision tracking fields to workflow state
+4. **Comprehensive Testing**: Full coverage of interrupt, review, and resume workflow patterns
+
+#### Testing Results
+- ✅ HITL gate successfully interrupts workflow at designated checkpoints
+- ✅ Human decisions properly captured and integrated into workflow state
+- ✅ Workflow resumption maintains complete state continuity
+- ✅ All existing tests continue to pass with HITL integration
+- ✅ Frontend handles interrupted workflows gracefully
+
+---
+
+### ✅ Issue #12: Code Generation & Validation using Claude Code SDK
+**Status**: COMPLETED
+**Epic**: Code Generation
+**Completion Date**: 2025-09-14
+
+#### What Was Implemented
+- [x] Claude Code SDK integration for infrastructure code generation
+- [x] Code generation agent producing Terraform, Docker, and application code
+- [x] Code validation agent for syntax checking and best practices enforcement
+- [x] Artifact management system for generated code storage and retrieval
+- [x] S3 integration for code artifact persistence and versioning
+- [x] Comprehensive testing of code generation and validation workflows
+
+#### Key Files Created/Modified
+- `libs/codegen_service.py` - **NEW**: Claude Code SDK integration for code generation
+- `libs/validation_service.py` - **NEW**: Comprehensive code validation and quality checking
+- `libs/codegen_agent.py` - **NEW**: LLM agent for infrastructure code generation
+- `libs/validation_agent.py` - **NEW**: LLM agent for code validation and quality assurance
+- `tests/test_codegen_integration.py` - **NEW**: End-to-end code generation testing
+- `tests/test_codegen_service.py` - **NEW**: Code generation service unit tests
+- `tests/test_validation_service.py` - **NEW**: Validation service comprehensive testing
+
+#### Challenges Encountered
+1. **Claude Code SDK Integration**: Required proper authentication and API integration patterns
+2. **Code Quality Validation**: Needed comprehensive validation beyond basic syntax checking
+3. **Artifact Management**: Generated code needed proper storage, versioning, and retrieval
+4. **Error Handling**: Code generation failures needed graceful degradation and retry logic
+
+#### Solutions Implemented
+1. **SDK Integration**: Proper Claude Code SDK integration with authentication and error handling
+2. **Multi-layer Validation**: Syntax validation, best practices checking, and security scanning
+3. **S3 Artifact Storage**: Comprehensive artifact management with versioning and metadata
+4. **Robust Error Recovery**: Comprehensive error handling with automatic retry mechanisms
+
+#### Testing Results
+- ✅ Claude Code SDK successfully generates infrastructure code
+- ✅ Code validation catches syntax errors and quality issues
+- ✅ Artifact management properly stores and retrieves generated code
+- ✅ All existing workflow tests continue to pass
+- ✅ End-to-end code generation workflow validated
+
+---
+
+### ✅ Issue #13: Streaming "Reason Cards" & SSE Resilience
+**Status**: COMPLETED
+**Epic**: Real-time User Experience
+**Completion Date**: 2025-09-15
+
+#### What Was Implemented
+- [x] Server-Sent Events (SSE) streaming infrastructure for real-time agent reasoning
+- [x] Streaming reason cards showing live agent decision-making process
+- [x] Claude-style unified workflow interface replacing separate Progress/Reasoning tabs
+- [x] SSE connection resilience with automatic reconnection and error handling
+- [x] Real-time workflow progress tracking with dynamic status updates
+- [x] Enhanced frontend chat interface with inline workflow display
+- [x] Comprehensive streaming event management and deduplication
+
+#### Key Files Created/Modified
+- `libs/streaming_service.py` - **NEW**: SSE streaming service with event management
+- `libs/streaming_models.py` - **NEW**: Pydantic models for streaming events and reason cards
+- `frontend/hooks/useStreamingEvents.ts` - **NEW**: React hook for SSE connection management
+- `frontend/components/streaming/workflow-container.tsx` - **NEW**: Claude-style unified workflow display
+- `frontend/components/streaming/workflow-step.tsx` - **NEW**: Collapsible workflow steps with reasoning
+- `frontend/components/chat/enhanced-chat-interface.tsx` - **NEW**: Enhanced chat with streaming integration
+- `frontend/app/page.tsx` - Complete rewrite for full-width Claude-style interface
+- `api/main.py` - Added SSE endpoints and streaming event emission
+- `libs/graph.py` - Integrated streaming service with LangGraph workflow execution
+- `tests/test_streaming_functionality.py` - **NEW**: Comprehensive streaming workflow testing
+
+#### Challenges Encountered
+1. **Duplicate Workflow Sections**: Multiple WorkflowContainer instances created for same decision set
+2. **SSE Connection Resilience**: Network interruptions caused connection drops without recovery
+3. **Event Deduplication**: Backend emitted duplicate reason cards causing frontend confusion
+4. **UI Complexity**: Separate Progress/Reasoning tabs created confusing user experience
+5. **Real-time State Management**: Complex state synchronization between SSE events and React state
+
+#### Solutions Implemented
+1. **Single Workflow Container**: Modified chat interface to show only one WorkflowContainer per unique decisionSetId
+2. **Automatic Reconnection**: Implemented exponential backoff reconnection with configurable retry limits
+3. **Backend Deduplication**: Added comprehensive deduplication logic in graph.py to prevent duplicate emissions
+4. **Claude-style Unified Interface**: Replaced tab system with inline collapsible workflow steps
+5. **Optimized State Management**: Simplified React state management with efficient event processing
+
+#### Architecture Integration
+
+**Enhanced Streaming Architecture**:
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Frontend      │    │   FastAPI       │    │   Worker        │
+│   (React)       │    │   Backend       │    │   Service       │
+│                 │    │                 │    │                 │
+│ SSE Connection ◄├────┤ /api/streams/{  │    │ LangGraph       │
+│                 │    │   decision_id}  │    │ Execution       │
+│ Real-time UI   ◄├────┤ Event Emission  │◄───┤ + Streaming     │
+│ Updates         │    │                 │    │ Service         │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+                                │                       │
+                                ▼                       ▼
+                         ┌─────────────────────────────────────┐
+                         │         PostgreSQL Database         │
+                         │                                     │
+                         │ • Streaming Events Storage         │
+                         │ • Reason Cards Persistence         │
+                         │ • Workflow Progress Tracking       │
+                         │ • SSE Connection Management        │
+                         └─────────────────────────────────────┘
+```
+
+#### Key Features Implemented
+1. **Real-time Reason Cards**: Live streaming of agent decision-making process with reasoning, confidence scores, and alternatives considered
+2. **Claude-style Interface**: Unified workflow display with collapsible sections and brain icons for reasoning steps
+3. **SSE Resilience**: Automatic reconnection, heartbeat monitoring, and graceful error handling
+4. **Event Management**: Comprehensive event deduplication and ordering with memory limits
+5. **Progress Tracking**: Dynamic workflow progress with completion percentages and status updates
+6. **Mobile Responsive**: Full responsive design working across desktop and mobile devices
+
+#### UI/UX Improvements
+- **Before**: Confusing separate Progress and Reasoning tabs that didn't show real-time updates
+- **After**: Claude-style unified interface with inline workflow steps showing live agent reasoning
+- **Full-width Layout**: Removed Code Repository sidebar for clean, focused chat experience
+- **Real-time Updates**: Live streaming of agent reasoning with expandable details and confidence scores
+- **Visual Hierarchy**: Clear distinction between user messages, system responses, and workflow progress
+
+#### Testing Results
+- ✅ SSE connections establish successfully with automatic reconnection
+- ✅ Reason cards stream in real-time with complete agent reasoning details
+- ✅ No duplicate workflow sections appear after completion
+- ✅ Full-width interface provides clean user experience
+- ✅ Workflow progress updates dynamically with completion status
+- ✅ All existing API and job system tests continue to pass
+- ✅ End-to-end streaming functionality validated with Playwright
+- ✅ Event deduplication prevents duplicate reason cards
+- ✅ Mobile responsive design verified across devices
+
+#### Production Features
+- **Horizontal Scaling**: Multiple SSE connections supported per decision set
+- **Memory Management**: Automatic cleanup of old events to prevent memory leaks
+- **Error Recovery**: Comprehensive error handling with user-friendly error messages
+- **Performance Optimization**: Efficient event processing with minimal re-renders
+- **Security**: Proper CORS handling and connection validation
+- **Monitoring**: Comprehensive logging for streaming service debugging
+
 ---
 
 ## Implementation Notes

@@ -228,3 +228,10 @@ deployment-config.env
 test.db
 test.db.checkpoints*
 *.db.checkpoints
+
+# Debug and temporary files
+debug/
+.playwright-mcp/
+traces/
+screenshots/
+ui-artifacts/
