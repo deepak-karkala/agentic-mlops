@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import signal
 import uuid
 from contextlib import contextmanager
 from typing import List, Literal, Optional
@@ -481,9 +480,7 @@ async def stream_workflow_progress(decision_set_id: str, db: Session = Depends(g
                     payload["message"] = event.message
 
                 out = {"event": event.event_type.value, "data": _json.dumps(payload)}
-                logger.info(
-                    f"SSE yielding event #{event_count}: {event.event_type}"
-                )
+                logger.info(f"SSE yielding event #{event_count}: {event.event_type}")
                 yield out
 
         except asyncio.CancelledError:
@@ -492,9 +489,7 @@ async def stream_workflow_progress(decision_set_id: str, db: Session = Depends(g
             )
             raise
         except Exception as e:
-            logger.exception(
-                f"SSE stream error for decision_set_id: {decision_set_id}"
-            )
+            logger.exception(f"SSE stream error for decision_set_id: {decision_set_id}")
             # Try to emit an error event through the streaming service
             await streaming_service.emit_error(
                 decision_set_id, f"Stream error: {str(e)}"
@@ -512,9 +507,7 @@ async def stream_workflow_progress(decision_set_id: str, db: Session = Depends(g
 
 @app.post("/api/streams/{decision_set_id}/emit")
 async def emit_streaming_event(
-    decision_set_id: str,
-    event_data: dict,
-    db: Session = Depends(get_db)
+    decision_set_id: str, event_data: dict, db: Session = Depends(get_db)
 ):
     """
     Endpoint for worker to emit streaming events to connected SSE clients.
@@ -523,7 +516,7 @@ async def emit_streaming_event(
     so they reach the frontend SSE connections.
     """
     from libs.streaming_service import get_streaming_service
-    from libs.streaming_models import StreamEvent, StreamEventType, create_reason_card
+    from libs.streaming_models import create_reason_card
 
     streaming_service = get_streaming_service()
 
@@ -543,7 +536,7 @@ async def emit_streaming_event(
                 inputs=event_data.get("inputs", {}),
                 outputs=event_data.get("outputs", {}),
                 alternatives_considered=event_data.get("alternatives_considered", []),
-                priority=event_data.get("priority", "medium")
+                priority=event_data.get("priority", "medium"),
             )
             await streaming_service.emit_reason_card(reason_card)
 
@@ -551,7 +544,7 @@ async def emit_streaming_event(
             await streaming_service.emit_node_start(
                 decision_set_id,
                 event_data.get("node_name", "unknown"),
-                event_data.get("message", "")
+                event_data.get("message", ""),
             )
 
         elif event_type == "node_complete":
@@ -559,13 +552,12 @@ async def emit_streaming_event(
                 decision_set_id,
                 event_data.get("node_name", "unknown"),
                 event_data.get("outputs", {}),
-                event_data.get("message", "")
+                event_data.get("message", ""),
             )
 
         elif event_type == "error":
             await streaming_service.emit_error(
-                decision_set_id,
-                event_data.get("message", "Unknown error")
+                decision_set_id, event_data.get("message", "Unknown error")
             )
 
         return {"status": "success", "message": "Event emitted"}
@@ -579,6 +571,7 @@ async def emit_streaming_event(
 # INTEGRATED WORKER SERVICE
 # ============================================================================
 
+
 class IntegratedWorkerService:
     """
     Integrated worker service that runs in the same process as the API server.
@@ -587,7 +580,9 @@ class IntegratedWorkerService:
     for separate worker processes and HTTP-based event streaming.
     """
 
-    def __init__(self, worker_id: str = None, poll_interval: int = 5, lease_duration: int = 30):
+    def __init__(
+        self, worker_id: str = None, poll_interval: int = 5, lease_duration: int = 30
+    ):
         self.worker_id = worker_id or f"worker-{uuid.uuid4().hex[:8]}"
         self.poll_interval = poll_interval  # seconds between job polls
         self.lease_duration = lease_duration  # minutes to hold job lease
@@ -746,7 +741,9 @@ class IntegratedWorkerService:
         if not thread_id:
             raise ValueError("Job payload missing required thread_id")
 
-        logger.info(f"Processing ML workflow for thread {thread_id}, decision_set {decision_set_id}")
+        logger.info(
+            f"Processing ML workflow for thread {thread_id}, decision_set {decision_set_id}"
+        )
 
         # Convert messages back to LangChain format
         from langchain_core.messages import HumanMessage, AIMessage
@@ -768,22 +765,35 @@ class IntegratedWorkerService:
         # Execute the graph with streaming
         # Use direct streaming service access (no HTTP bridge needed)
         from libs.streaming_service import get_streaming_service
+
         streaming_service = get_streaming_service()
 
         try:
             # Use enhanced multi-mode streaming for richer agent reasoning data
             # Following LangGraph best practices: combine "updates" and "messages" modes
             stream_modes = ["updates", "messages"]
-            logger.info(f"Starting LangGraph multi-mode streaming for thread {thread_id}, modes: {stream_modes}, emitting events to decision_set {decision_set_id}")
+            logger.info(
+                f"Starting LangGraph multi-mode streaming for thread {thread_id}, modes: {stream_modes}, emitting events to decision_set {decision_set_id}"
+            )
 
-            for stream_mode, chunk in self.graph.stream(state, config, stream_mode=stream_modes):
+            for stream_mode, chunk in self.graph.stream(
+                state, config, stream_mode=stream_modes
+            ):
                 # Process different stream modes for comprehensive agent insights
-                logger.info(f"Received {stream_mode} stream chunk: {type(chunk)} keys: {list(chunk.keys()) if isinstance(chunk, dict) else 'not-dict'}")
-                await self._process_multi_mode_chunk(stream_mode, chunk, decision_set_id, streaming_service)
-            logger.info(f"LangGraph multi-mode streaming completed for thread {thread_id}")
+                logger.info(
+                    f"Received {stream_mode} stream chunk: {type(chunk)} keys: {list(chunk.keys()) if isinstance(chunk, dict) else 'not-dict'}"
+                )
+                await self._process_multi_mode_chunk(
+                    stream_mode, chunk, decision_set_id, streaming_service
+                )
+            logger.info(
+                f"LangGraph multi-mode streaming completed for thread {thread_id}"
+            )
         except Exception as stream_error:
             logger.error(f"Streaming execution failed: {stream_error}")
-            await streaming_service.emit_error(decision_set_id, f"Workflow execution failed: {str(stream_error)}")
+            await streaming_service.emit_error(
+                decision_set_id, f"Workflow execution failed: {str(stream_error)}"
+            )
             raise
 
         # Log the result for now
@@ -793,7 +803,9 @@ class IntegratedWorkerService:
         # For now, we'll simulate some processing time
         await asyncio.sleep(2)
 
-    async def _process_stream_chunk(self, chunk, decision_set_id: str, streaming_service):
+    async def _process_stream_chunk(
+        self, chunk, decision_set_id: str, streaming_service
+    ):
         """
         Process a single stream chunk from LangGraph and emit appropriate SSE events.
 
@@ -810,57 +822,82 @@ class IntegratedWorkerService:
                 logger.info(f"Node update: {node_name} -> {node_update}")
 
                 # Emit node start event
-                await streaming_service.emit_node_start(decision_set_id, node_name, f"Starting {node_name}")
+                await streaming_service.emit_node_start(
+                    decision_set_id, node_name, f"Starting {node_name}"
+                )
 
                 # Look for reason cards in the node state
-                if hasattr(node_update, 'reason_cards') and node_update.reason_cards:
+                if hasattr(node_update, "reason_cards") and node_update.reason_cards:
                     # Deduplicate reason cards based on content
-                    unique_reason_cards = self._deduplicate_reason_cards(node_update.reason_cards)
-                    logger.info(f"Found {len(node_update.reason_cards)} reason cards, {len(unique_reason_cards)} unique after deduplication")
+                    unique_reason_cards = self._deduplicate_reason_cards(
+                        node_update.reason_cards
+                    )
+                    logger.info(
+                        f"Found {len(node_update.reason_cards)} reason cards, {len(unique_reason_cards)} unique after deduplication"
+                    )
                     for reason_card in unique_reason_cards:
                         await streaming_service.emit_reason_card(reason_card)
 
                 # Look for reason cards in nested state structures
                 elif isinstance(node_update, dict):
-                    reason_cards = node_update.get('reason_cards', [])
-                    logger.info(f"Found {len(reason_cards)} reason cards in dict structure")
+                    reason_cards = node_update.get("reason_cards", [])
+                    logger.info(
+                        f"Found {len(reason_cards)} reason cards in dict structure"
+                    )
 
                     # Deduplicate reason cards before processing
                     unique_reason_cards = self._deduplicate_reason_cards(reason_cards)
-                    logger.info(f"After deduplication: {len(unique_reason_cards)} unique reason cards")
+                    logger.info(
+                        f"After deduplication: {len(unique_reason_cards)} unique reason cards"
+                    )
 
                     for i, reason_card in enumerate(unique_reason_cards):
-                        logger.info(f"Processing unique reason card {i+1}: type={type(reason_card)}, has_model_dump={hasattr(reason_card, 'model_dump')}")
-                        if hasattr(reason_card, 'model_dump'):  # Pydantic model
+                        logger.info(
+                            f"Processing unique reason card {i + 1}: type={type(reason_card)}, has_model_dump={hasattr(reason_card, 'model_dump')}"
+                        )
+                        if hasattr(reason_card, "model_dump"):  # Pydantic model
                             # Emit reason card directly via streaming service
                             await streaming_service.emit_reason_card(reason_card)
-                        elif isinstance(reason_card, dict):  # Dictionary-based reason card
-                            logger.info(f"Emitting dict-based reason card: {reason_card.get('agent', 'unknown')}")
+                        elif isinstance(
+                            reason_card, dict
+                        ):  # Dictionary-based reason card
+                            logger.info(
+                                f"Emitting dict-based reason card: {reason_card.get('agent', 'unknown')}"
+                            )
                             # Create reason card from dictionary data
                             from libs.streaming_models import create_reason_card
+
                             reason_card_obj = create_reason_card(
-                                agent=reason_card.get('agent', 'unknown'),
-                                node=reason_card.get('node_name', 'unknown'),
+                                agent=reason_card.get("agent", "unknown"),
+                                node=reason_card.get("node_name", "unknown"),
                                 decision_set_id=decision_set_id,
-                                reasoning=reason_card.get('outputs', {}).get('extraction_rationale', 'No rationale provided'),
+                                reasoning=reason_card.get("outputs", {}).get(
+                                    "extraction_rationale", "No rationale provided"
+                                ),
                                 decision=f"Extracted constraints with {reason_card.get('confidence', 0)} confidence",
                                 category="constraint_extraction",
-                                confidence=reason_card.get('confidence', 0.5),
-                                inputs=reason_card.get('inputs', {}),
-                                outputs=reason_card.get('outputs', {}),
+                                confidence=reason_card.get("confidence", 0.5),
+                                inputs=reason_card.get("inputs", {}),
+                                outputs=reason_card.get("outputs", {}),
                                 alternatives_considered=[],
-                                priority="medium"
+                                priority="medium",
                             )
                             await streaming_service.emit_reason_card(reason_card_obj)
                         else:
-                            logger.warning(f"Unknown reason card type: {type(reason_card)}, skipping")
+                            logger.warning(
+                                f"Unknown reason card type: {type(reason_card)}, skipping"
+                            )
 
                 # Emit node completion
-                await streaming_service.emit_node_complete(decision_set_id, node_name, {}, f"Completed {node_name}")
+                await streaming_service.emit_node_complete(
+                    decision_set_id, node_name, {}, f"Completed {node_name}"
+                )
 
         except Exception as e:
             logger.error(f"Error processing stream chunk: {e}")
-            await streaming_service.emit_error(decision_set_id, f"Stream processing error: {str(e)}")
+            await streaming_service.emit_error(
+                decision_set_id, f"Stream processing error: {str(e)}"
+            )
 
     def _deduplicate_reason_cards(self, reason_cards):
         """
@@ -880,7 +917,7 @@ class IntegratedWorkerService:
 
         for card in reason_cards:
             # Create a hash key based on the card's content
-            if hasattr(card, 'model_dump'):  # Pydantic model
+            if hasattr(card, "model_dump"):  # Pydantic model
                 # Use key fields to create a unique identifier
                 key = (
                     card.agent,
@@ -888,17 +925,17 @@ class IntegratedWorkerService:
                     card.trigger,
                     str(card.inputs),
                     str(card.outputs),
-                    card.confidence
+                    card.confidence,
                 )
             elif isinstance(card, dict):  # Dictionary-based reason card
                 # Use key fields to create a unique identifier
                 key = (
-                    card.get('agent', ''),
-                    card.get('node_name', ''),
-                    card.get('trigger', ''),
-                    str(card.get('inputs', {})),
-                    str(card.get('outputs', {})),
-                    card.get('confidence', 0)
+                    card.get("agent", ""),
+                    card.get("node_name", ""),
+                    card.get("trigger", ""),
+                    str(card.get("inputs", {})),
+                    str(card.get("outputs", {})),
+                    card.get("confidence", 0),
                 )
             else:
                 # Fallback: convert to string
@@ -912,7 +949,9 @@ class IntegratedWorkerService:
 
         return unique_cards
 
-    async def _process_multi_mode_chunk(self, stream_mode: str, chunk, decision_set_id: str, streaming_service):
+    async def _process_multi_mode_chunk(
+        self, stream_mode: str, chunk, decision_set_id: str, streaming_service
+    ):
         """
         Process LangGraph multi-mode stream chunks for enhanced agent reasoning.
 
@@ -927,20 +966,29 @@ class IntegratedWorkerService:
 
             if stream_mode == "updates":
                 # Process node state updates (contains reason cards and node execution info)
-                await self._process_stream_chunk(chunk, decision_set_id, streaming_service)
+                await self._process_stream_chunk(
+                    chunk, decision_set_id, streaming_service
+                )
 
             elif stream_mode == "messages":
                 # Process LLM message streams (contains token-level reasoning)
-                await self._process_message_chunk(chunk, decision_set_id, streaming_service)
+                await self._process_message_chunk(
+                    chunk, decision_set_id, streaming_service
+                )
 
             else:
                 logger.debug(f"Unhandled stream mode: {stream_mode}")
 
         except Exception as e:
             logger.error(f"Error processing {stream_mode} stream chunk: {e}")
-            await streaming_service.emit_error(decision_set_id, f"Stream processing error in {stream_mode} mode: {str(e)}")
+            await streaming_service.emit_error(
+                decision_set_id,
+                f"Stream processing error in {stream_mode} mode: {str(e)}",
+            )
 
-    async def _process_message_chunk(self, chunk, decision_set_id: str, streaming_service):
+    async def _process_message_chunk(
+        self, chunk, decision_set_id: str, streaming_service
+    ):
         """
         Process LLM message chunks for token-level reasoning insights.
 
@@ -965,11 +1013,12 @@ class IntegratedWorkerService:
 
                 # Emit as a generic stream event for advanced UIs
                 from libs.streaming_models import StreamEvent, StreamEventType
+
                 event = StreamEvent(
                     event_type=StreamEventType.NODE_START,  # Reuse for now
                     decision_set_id=decision_set_id,
                     data=message_data,
-                    message=f"LLM reasoning: {message_data['content'][:100]}..."
+                    message=f"LLM reasoning: {message_data['content'][:100]}...",
                 )
                 await streaming_service.emit_event(event)
 

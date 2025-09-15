@@ -1,28 +1,28 @@
 /**
  * StreamingPanel component that displays real-time workflow events
- * 
+ *
  * Combines workflow progress, reason cards, and event stream into a cohesive UI
  */
 
-import React, { useState, useEffect, useRef } from 'react';
-import { Card } from '../ui/card';
-import { Badge } from '../ui/badge';
-import { Button } from '../ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
-import { 
-  Activity, 
-  Brain, 
-  AlertCircle, 
-  RefreshCw, 
-  Wifi, 
+import React, { useState, useEffect, useRef } from "react";
+import { Card } from "../ui/card";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
+import {
+  Activity,
+  Brain,
+  AlertCircle,
+  RefreshCw,
+  Wifi,
   WifiOff,
   ChevronDown,
   ChevronUp,
-  Clock
-} from 'lucide-react';
-import { useStreamingEvents } from '../../hooks/useStreamingEvents';
-import { ReasonCard } from './reason-card';
-import { WorkflowProgress } from './workflow-progress';
+  Clock,
+} from "lucide-react";
+import { useStreamingEvents } from "../../hooks/useStreamingEvents";
+import { ReasonCard } from "./reason-card";
+import { WorkflowProgress } from "./workflow-progress";
 
 interface StreamingPanelProps {
   decisionSetId?: string;
@@ -35,14 +35,14 @@ interface StreamingPanelProps {
 
 export function StreamingPanel({
   decisionSetId,
-  className = '',
+  className = "",
   autoConnect = true,
   showProgress = true,
   showReasonCards = true,
   showEvents = true,
 }: StreamingPanelProps) {
   const [isExpanded, setIsExpanded] = useState(true);
-  const [activeTab, setActiveTab] = useState('progress');
+  const [activeTab, setActiveTab] = useState("progress");
   const reasonCardsEndRef = useRef<HTMLDivElement>(null);
   const eventsEndRef = useRef<HTMLDivElement>(null);
 
@@ -72,22 +72,22 @@ export function StreamingPanel({
 
   // Auto-scroll to latest reason card
   useEffect(() => {
-    if (activeTab === 'reasoning' && reasonCardsEndRef.current) {
-      reasonCardsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (activeTab === "reasoning" && reasonCardsEndRef.current) {
+      reasonCardsEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [reasonCards, activeTab]);
 
   // Auto-scroll to latest event
   useEffect(() => {
-    if (activeTab === 'events' && eventsEndRef.current) {
-      eventsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (activeTab === "events" && eventsEndRef.current) {
+      eventsEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [events, activeTab]);
 
   // Auto-switch to reasoning tab when new reason card arrives
   useEffect(() => {
-    if (reasonCards.length > 0 && activeTab === 'progress') {
-      setActiveTab('reasoning');
+    if (reasonCards.length > 0 && activeTab === "progress") {
+      setActiveTab("reasoning");
     }
   }, [reasonCards.length, activeTab]);
 
@@ -96,23 +96,46 @@ export function StreamingPanel({
     try {
       return new Date(timestamp).toLocaleTimeString();
     } catch {
-      return 'Invalid time';
+      return "Invalid time";
     }
   };
 
   // Get event type display info
   const getEventTypeInfo = (eventType: string) => {
     const types = {
-      'workflow-start': { label: 'Workflow Started', color: 'bg-blue-100 text-blue-800' },
-      'workflow-complete': { label: 'Workflow Complete', color: 'bg-green-100 text-green-800' },
-      'workflow-paused': { label: 'Workflow Paused', color: 'bg-yellow-100 text-yellow-800' },
-      'node-start': { label: 'Node Start', color: 'bg-purple-100 text-purple-800' },
-      'node-complete': { label: 'Node Complete', color: 'bg-green-100 text-green-800' },
-      'reason-card': { label: 'Reason Card', color: 'bg-blue-100 text-blue-800' },
-      'error': { label: 'Error', color: 'bg-red-100 text-red-800' },
-      'heartbeat': { label: 'Heartbeat', color: 'bg-gray-100 text-gray-800' },
+      "workflow-start": {
+        label: "Workflow Started",
+        color: "bg-blue-100 text-blue-800",
+      },
+      "workflow-complete": {
+        label: "Workflow Complete",
+        color: "bg-green-100 text-green-800",
+      },
+      "workflow-paused": {
+        label: "Workflow Paused",
+        color: "bg-yellow-100 text-yellow-800",
+      },
+      "node-start": {
+        label: "Node Start",
+        color: "bg-purple-100 text-purple-800",
+      },
+      "node-complete": {
+        label: "Node Complete",
+        color: "bg-green-100 text-green-800",
+      },
+      "reason-card": {
+        label: "Reason Card",
+        color: "bg-blue-100 text-blue-800",
+      },
+      error: { label: "Error", color: "bg-red-100 text-red-800" },
+      heartbeat: { label: "Heartbeat", color: "bg-gray-100 text-gray-800" },
     };
-    return types[eventType as keyof typeof types] || { label: eventType, color: 'bg-gray-100 text-gray-800' };
+    return (
+      types[eventType as keyof typeof types] || {
+        label: eventType,
+        color: "bg-gray-100 text-gray-800",
+      }
+    );
   };
 
   if (!decisionSetId) {
@@ -136,11 +159,16 @@ export function StreamingPanel({
             <Activity className="h-4 w-4 text-primary" />
             <span className="font-medium text-sm">Real-time Updates</span>
             {/* Connection Status */}
-            <Badge variant="outline" className={`text-xs ${
-              isConnected ? 'bg-green-100 text-green-800 border-green-200' :
-              isConnecting ? 'bg-yellow-100 text-yellow-800 border-yellow-200' :
-              'bg-red-100 text-red-800 border-red-200'
-            }`}>
+            <Badge
+              variant="outline"
+              className={`text-xs ${
+                isConnected
+                  ? "bg-green-100 text-green-800 border-green-200"
+                  : isConnecting
+                    ? "bg-yellow-100 text-yellow-800 border-yellow-200"
+                    : "bg-red-100 text-red-800 border-red-200"
+              }`}
+            >
               {isConnected ? (
                 <>
                   <Wifi className="h-2 w-2 mr-1" />
@@ -191,7 +219,7 @@ export function StreamingPanel({
         {(error || connectionError) && (
           <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-red-700 text-xs flex items-center space-x-1">
             <AlertCircle className="h-3 w-3" />
-            <span>{error || 'Connection failed'}</span>
+            <span>{error || "Connection failed"}</span>
           </div>
         )}
       </div>
@@ -213,7 +241,10 @@ export function StreamingPanel({
                 <TabsTrigger value="reasoning" className="text-xs">
                   Reasoning
                   {hasReasonCards && (
-                    <Badge variant="secondary" className="ml-1 text-xs h-4 px-1">
+                    <Badge
+                      variant="secondary"
+                      className="ml-1 text-xs h-4 px-1"
+                    >
                       {reasonCards.length}
                     </Badge>
                   )}
@@ -223,7 +254,10 @@ export function StreamingPanel({
                 <TabsTrigger value="events" className="text-xs">
                   Events
                   {hasEvents && (
-                    <Badge variant="secondary" className="ml-1 text-xs h-4 px-1">
+                    <Badge
+                      variant="secondary"
+                      className="ml-1 text-xs h-4 px-1"
+                    >
                       {events.length}
                     </Badge>
                   )}
@@ -235,8 +269,8 @@ export function StreamingPanel({
             {showProgress && (
               <TabsContent value="progress" className="mt-3">
                 {workflowProgress ? (
-                  <WorkflowProgress 
-                    progress={workflowProgress} 
+                  <WorkflowProgress
+                    progress={workflowProgress}
                     currentNode={currentNode}
                   />
                 ) : (
@@ -260,7 +294,9 @@ export function StreamingPanel({
                     <div className="text-center text-muted-foreground py-8">
                       <Brain className="h-6 w-6 mx-auto mb-2 opacity-50" />
                       <p className="text-sm">No reasoning cards yet</p>
-                      <p className="text-xs mt-1">Agent rationale will appear here</p>
+                      <p className="text-xs mt-1">
+                        Agent rationale will appear here
+                      </p>
                     </div>
                   )}
                   <div ref={reasonCardsEndRef} />
@@ -276,9 +312,15 @@ export function StreamingPanel({
                     events.map((event, index) => {
                       const eventInfo = getEventTypeInfo(event.type);
                       return (
-                        <div key={index} className="flex items-start space-x-2 p-2 bg-muted/50 rounded text-xs">
+                        <div
+                          key={index}
+                          className="flex items-start space-x-2 p-2 bg-muted/50 rounded text-xs"
+                        >
                           <div className="flex items-center space-x-1 min-w-0 flex-1">
-                            <Badge variant="outline" className={`${eventInfo.color} text-xs`}>
+                            <Badge
+                              variant="outline"
+                              className={`${eventInfo.color} text-xs`}
+                            >
                               {eventInfo.label}
                             </Badge>
                             {event.message && (
@@ -298,7 +340,9 @@ export function StreamingPanel({
                     <div className="text-center text-muted-foreground py-8">
                       <AlertCircle className="h-6 w-6 mx-auto mb-2 opacity-50" />
                       <p className="text-sm">No events yet</p>
-                      <p className="text-xs mt-1">System events will appear here</p>
+                      <p className="text-xs mt-1">
+                        System events will appear here
+                      </p>
                     </div>
                   )}
                   <div ref={eventsEndRef} />

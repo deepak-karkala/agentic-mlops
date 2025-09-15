@@ -42,29 +42,7 @@ EOF
     echo "⚠️  Created placeholder api/Dockerfile - you'll need to customize it"
 fi
 
-if [ ! -f worker/Dockerfile ]; then
-    echo "❌ worker/Dockerfile not found. Creating a placeholder..."
-    mkdir -p worker
-    cat > worker/Dockerfile << 'EOF'
-FROM python:3.11-slim
-
-WORKDIR /app
-
-# Install dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy application code
-COPY worker/ .
-
-# Expose port
-EXPOSE 8080
-
-# Run the application
-CMD ["python", "main.py"]
-EOF
-    echo "⚠️  Created placeholder worker/Dockerfile - you'll need to customize it"
-fi
+# Worker Dockerfile check removed - worker is now integrated into API server
 
 # Create placeholder requirements.txt if it doesn't exist
 if [ ! -f requirements.txt ]; then
@@ -86,25 +64,19 @@ fi
 echo "🔍 Getting ECR repository URLs..."
 cd infra/terraform
 API_REPO=$(terraform output -raw api_ecr_repository_url)
-WORKER_REPO=$(terraform output -raw worker_ecr_repository_url)
 FRONTEND_REPO=$(terraform output -raw frontend_ecr_repository_url)
 cd ../..
 
 echo "📍 API Repository: $API_REPO"
-echo "📍 Worker Repository: $WORKER_REPO"
 echo "📍 Frontend Repository: $FRONTEND_REPO"
 
 # Login to ECR
 echo "🔑 Logging into ECR..."
 aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $API_REPO
 
-# Build API image
+# Build API image (includes integrated worker functionality)
 echo "🔨 Building API image..."
 docker build -f api/Dockerfile -t $API_REPO:latest .
-
-# Build Worker image  
-echo "🔨 Building Worker image..."
-docker build -f worker/Dockerfile -t $WORKER_REPO:latest .
 
 # Build Frontend image
 echo "🔨 Building Frontend image..."
@@ -114,9 +86,6 @@ docker build -f frontend/Dockerfile -t $FRONTEND_REPO:latest .
 echo "📤 Pushing API image..."
 docker push $API_REPO:latest
 
-echo "📤 Pushing Worker image..."
-docker push $WORKER_REPO:latest
-
 echo "📤 Pushing Frontend image..."
 docker push $FRONTEND_REPO:latest
 
@@ -124,7 +93,6 @@ docker push $FRONTEND_REPO:latest
 echo "💾 Saving image URIs..."
 cat >> deployment-config.env << EOF
 API_IMAGE="$API_REPO:latest"
-WORKER_IMAGE="$WORKER_REPO:latest"
 FRONTEND_IMAGE="$FRONTEND_REPO:latest"
 EOF
 

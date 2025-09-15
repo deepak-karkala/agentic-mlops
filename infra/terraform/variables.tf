@@ -21,11 +21,7 @@ variable "api_image" {
   default     = ""
 }
 
-variable "worker_image" {
-  description = "ECR image identifier for worker service"
-  type        = string
-  default     = ""
-}
+# worker_image variable removed - worker is now integrated into API service
 
 variable "frontend_image" {
   description = "ECR image identifier for frontend service"

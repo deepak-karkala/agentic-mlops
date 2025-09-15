@@ -3,10 +3,7 @@ output "api_service_url" {
   value       = length(aws_apprunner_service.api) > 0 ? aws_apprunner_service.api[0].service_url : "Not deployed yet - run phase 3"
 }
 
-output "worker_service_url" {
-  description = "URL of the Worker App Runner service"
-  value       = length(aws_apprunner_service.worker) > 0 ? aws_apprunner_service.worker[0].service_url : "Not deployed yet - run phase 3"
-}
+# Worker service output removed - worker is now integrated into API service
 
 output "frontend_service_url" {
   description = "URL of the Frontend App Runner service"
@@ -38,10 +35,7 @@ output "api_ecr_repository_url" {
   value       = aws_ecr_repository.api.repository_url
 }
 
-output "worker_ecr_repository_url" {
-  description = "URL of the Worker ECR repository"
-  value       = aws_ecr_repository.worker.repository_url
-}
+# Worker ECR repository output removed - worker is now integrated into API service
 
 output "frontend_ecr_repository_url" {
   description = "URL of the Frontend ECR repository"

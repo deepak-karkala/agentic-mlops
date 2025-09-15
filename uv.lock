@@ -12,6 +12,7 @@ dependencies = [
     { name = "boto3" },
     { name = "claude-code-sdk" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "langchain-core" },
     { name = "langgraph" },
     { name = "langgraph-checkpoint" },
@@ -21,6 +22,7 @@ dependencies = [
     { name = "psycopg", extra = ["binary"] },
     { name = "psycopg2-binary" },
     { name = "sqlalchemy" },
+    { name = "sse-starlette" },
     { name = "uvicorn" },
 ]
 
@@ -40,6 +42,7 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.26.0" },
     { name = "claude-code-sdk" },
     { name = "fastapi" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "httpx", marker = "extra == 'dev'" },
     { name = "langchain-core" },
     { name = "langgraph" },
@@ -54,6 +57,7 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'dev'" },
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "sqlalchemy" },
+    { name = "sse-starlette", specifier = ">=2.0.0" },
     { name = "uvicorn" },
 ]
 provides-extras = ["dev"]

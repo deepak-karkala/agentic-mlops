@@ -1,6 +1,6 @@
 /**
  * Enhanced chat interface with real-time streaming support
- * 
+ *
  * Integrates with the async API and displays streaming events in real-time
  */
 
@@ -23,7 +23,7 @@ interface EnhancedMessage extends Message {
   isStreamingActive?: boolean;
 }
 
-interface EnhancedChatState extends Omit<ChatState, 'messages'> {
+interface EnhancedChatState extends Omit<ChatState, "messages"> {
   messages: EnhancedMessage[];
   currentDecisionSetId?: string;
 }
@@ -58,53 +58,60 @@ export default function EnhancedChatInterface() {
 
   // Poll job status
   const pollJobStatus = async (jobId: string, decisionSetId: string) => {
-    const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
-    
+    const apiBaseUrl =
+      process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+
     try {
       const response = await fetch(`${apiBaseUrl}/api/jobs/${jobId}/status`);
       if (!response.ok) {
         throw new Error(`Job status check failed: ${response.status}`);
       }
-      
+
       const jobStatus = await response.json();
-      
+
       // Update message with job status
-      setChatState(prev => ({
+      setChatState((prev) => ({
         ...prev,
-        messages: prev.messages.map(msg => 
-          msg.jobId === jobId 
-            ? { ...msg, jobStatus: jobStatus.status, isStreamingActive: jobStatus.status === 'processing' }
-            : msg
-        )
+        messages: prev.messages.map((msg) =>
+          msg.jobId === jobId
+            ? {
+                ...msg,
+                jobStatus: jobStatus.status,
+                isStreamingActive: jobStatus.status === "processing",
+              }
+            : msg,
+        ),
       }));
-      
+
       // Stop polling if job is complete or failed
-      if (jobStatus.status === 'completed' || jobStatus.status === 'failed') {
+      if (jobStatus.status === "completed" || jobStatus.status === "failed") {
         // Clear the interval immediately to stop further polling
         if (jobPollingIntervalRef.current) {
           clearInterval(jobPollingIntervalRef.current);
           jobPollingIntervalRef.current = null;
         }
 
-        setChatState(prev => ({
+        setChatState((prev) => ({
           ...prev,
           isLoading: false,
         }));
-        
+
         // If completed, add a completion message (only if not already added)
-        if (jobStatus.status === 'completed') {
-          setChatState(prev => {
+        if (jobStatus.status === "completed") {
+          setChatState((prev) => {
             // Check if completion message already exists for this jobId
-            const hasCompletionMessage = prev.messages.some(msg =>
-              msg.content.includes("MLOps architecture design completed") &&
-              msg.decisionSetId === decisionSetId
+            const hasCompletionMessage = prev.messages.some(
+              (msg) =>
+                msg.content.includes("MLOps architecture design completed") &&
+                msg.decisionSetId === decisionSetId,
             );
 
             if (!hasCompletionMessage) {
               const completionMessage: EnhancedMessage = {
                 id: Date.now().toString(),
                 role: "assistant",
-                content: "✅ MLOps architecture design completed! The workflow has finished successfully.",
+                content:
+                  "✅ MLOps architecture design completed! The workflow has finished successfully.",
                 timestamp: new Date(),
                 decisionSetId,
               };
@@ -119,19 +126,18 @@ export default function EnhancedChatInterface() {
           });
         }
       }
-      
     } catch (error) {
-      console.error('Job status polling failed:', error);
+      console.error("Job status polling failed:", error);
       // Stop polling on error
       if (jobPollingIntervalRef.current) {
         clearInterval(jobPollingIntervalRef.current);
         jobPollingIntervalRef.current = null;
       }
 
-      setChatState(prev => ({
+      setChatState((prev) => ({
         ...prev,
         isLoading: false,
-        error: `Job tracking failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        error: `Job tracking failed: ${error instanceof Error ? error.message : "Unknown error"}`,
       }));
     }
   };
@@ -157,7 +163,8 @@ export default function EnhancedChatInterface() {
 
     try {
       // Call the async API
-      const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+      const apiBaseUrl =
+        process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
       const response = await fetch(`${apiBaseUrl}/api/chat/async`, {
         method: "POST",
         headers: {
@@ -169,7 +176,9 @@ export default function EnhancedChatInterface() {
       });
 
       if (!response.ok) {
-        throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+        throw new Error(
+          `API request failed: ${response.status} ${response.statusText}`,
+        );
       }
 
       const data = await response.json();
@@ -198,14 +207,13 @@ Watch the Real-time Updates panel for live agent reasoning and progress updates.
         ...prev,
         messages: [...prev.messages, systemMessage],
         currentDecisionSetId: decision_set_id,
-        isLoading: status === 'completed', // Keep loading if not yet completed
+        isLoading: status === "completed", // Keep loading if not yet completed
       }));
 
       // Start job status polling
       jobPollingIntervalRef.current = setInterval(() => {
         pollJobStatus(job_id, decision_set_id);
       }, 3000); // Poll every 3 seconds
-
     } catch (error) {
       console.error("API call failed:", error);
       setChatState((prev) => ({
@@ -231,16 +239,36 @@ Watch the Real-time Updates panel for live agent reasoning and progress updates.
   // Get job status badge info
   const getJobStatusBadge = (status?: string) => {
     switch (status) {
-      case 'pending':
-        return { variant: 'outline' as const, color: 'text-yellow-600', text: 'Pending' };
-      case 'processing':
-        return { variant: 'default' as const, color: 'text-blue-600', text: 'Processing' };
-      case 'completed':
-        return { variant: 'outline' as const, color: 'text-green-600', text: 'Completed' };
-      case 'failed':
-        return { variant: 'destructive' as const, color: 'text-red-600', text: 'Failed' };
+      case "pending":
+        return {
+          variant: "outline" as const,
+          color: "text-yellow-600",
+          text: "Pending",
+        };
+      case "processing":
+        return {
+          variant: "default" as const,
+          color: "text-blue-600",
+          text: "Processing",
+        };
+      case "completed":
+        return {
+          variant: "outline" as const,
+          color: "text-green-600",
+          text: "Completed",
+        };
+      case "failed":
+        return {
+          variant: "destructive" as const,
+          color: "text-red-600",
+          text: "Failed",
+        };
       default:
-        return { variant: 'secondary' as const, color: 'text-gray-600', text: status || 'Unknown' };
+        return {
+          variant: "secondary" as const,
+          color: "text-gray-600",
+          text: status || "Unknown",
+        };
     }
   };
 
@@ -266,8 +294,12 @@ Watch the Real-time Updates panel for live agent reasoning and progress updates.
 
         {chatState.messages.map((message, index) => {
           // Track which decisionSetIds we've already shown WorkflowContainers for
-          const isFirstMessageWithDecisionSetId = message.role === "assistant" && message.decisionSetId &&
-            !chatState.messages.slice(0, index).some(m => m.decisionSetId === message.decisionSetId);
+          const isFirstMessageWithDecisionSetId =
+            message.role === "assistant" &&
+            message.decisionSetId &&
+            !chatState.messages
+              .slice(0, index)
+              .some((m) => m.decisionSetId === message.decisionSetId);
 
           return (
             <div key={message.id} className="space-y-2">
@@ -342,7 +374,6 @@ Watch the Real-time Updates panel for live agent reasoning and progress updates.
 
         <div ref={messagesEndRef} />
       </div>
-
 
       {/* Input Form */}
       <div className="border-t bg-background p-4">

@@ -2,12 +2,12 @@
  * Custom React hooks
  */
 
-export { 
+export {
   useStreamingEvents,
   type StreamEventType,
   type ReasonCard,
   type StreamEvent,
   type WorkflowProgress,
   type StreamingState,
-  type UseStreamingEventsOptions 
-} from './useStreamingEvents';
+  type UseStreamingEventsOptions,
+} from "./useStreamingEvents";

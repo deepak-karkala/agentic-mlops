@@ -14,7 +14,7 @@ fi
 source deployment-config.env
 
 # Check if images are available
-if [ -z "$API_IMAGE" ] || [ -z "$WORKER_IMAGE" ] || [ -z "$FRONTEND_IMAGE" ]; then
+if [ -z "$API_IMAGE" ] || [ -z "$FRONTEND_IMAGE" ]; then
     echo "❌ Image URIs not found. Please run ./2-build-and-push.sh first."
     exit 1
 fi
@@ -22,8 +22,7 @@ fi
 echo "📋 Using configuration:"
 echo "   Project: $PROJECT_NAME"
 echo "   Region: $REGION"
-echo "   API Image: $API_IMAGE"
-echo "   Worker Image: $WORKER_IMAGE"
+echo "   API Image: $API_IMAGE (includes integrated worker)"
 echo "   Frontend Image: $FRONTEND_IMAGE"
 
 # Deploy App Runner services
@@ -33,7 +32,6 @@ cd infra/terraform
 terraform plan \
   -var "artifact_bucket_name=$ARTIFACT_BUCKET" \
   -var "api_image=$API_IMAGE" \
-  -var "worker_image=$WORKER_IMAGE" \
   -var "frontend_image=$FRONTEND_IMAGE" \
   -var "db_username=postgres" \
   -var "db_password=changeme123!" \
@@ -46,7 +44,6 @@ if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
   terraform apply \
     -var "artifact_bucket_name=$ARTIFACT_BUCKET" \
     -var "api_image=$API_IMAGE" \
-    -var "worker_image=$WORKER_IMAGE" \
     -var "frontend_image=$FRONTEND_IMAGE" \
     -var "db_username=postgres" \
     -var "db_password=changeme123!" \
@@ -63,8 +60,7 @@ echo "✅ Complete deployment finished successfully!"
 echo ""
 echo "🌐 Application URLs:"
 echo "   Frontend Service: https://$(terraform output -raw frontend_service_url)"
-echo "   API Service: https://$(terraform output -raw api_service_url)"
-echo "   Worker Service: https://$(terraform output -raw worker_service_url)"
+echo "   API Service: https://$(terraform output -raw api_service_url) (includes integrated worker)"
 echo ""
 echo "🔗 Database Connection:"
 echo "   RDS Proxy Endpoint: $(terraform output -raw db_proxy_endpoint)"
