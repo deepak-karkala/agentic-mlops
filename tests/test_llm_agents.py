@@ -104,8 +104,7 @@ class TestIntakeExtractAgent:
         assert agent.agent_type == AgentType.INTAKE_EXTRACT
         assert agent.name == "Intake Extract Agent"
         assert "parse natural language" in agent.description.lower()
-        assert agent.model == "gpt-4-turbo-preview"
-        assert agent.temperature == 0.3
+        assert agent.model == "gpt-5-nano"
 
     def test_system_prompt_quality(self, agent):
         """Test system prompt contains key elements."""
@@ -208,8 +207,7 @@ class TestCoverageCheckAgent:
     def test_agent_creation(self, agent):
         """Test agent initialization."""
         assert agent.agent_type == AgentType.COVERAGE_CHECK
-        assert agent.model == "gpt-4-turbo-preview"
-        assert agent.temperature == 0.2  # Lower temperature for consistent analysis
+        assert agent.model == "gpt-5-nano"
 
     def test_required_predecessors(self, agent):
         """Test required predecessor agents."""
@@ -299,7 +297,6 @@ class TestAdaptiveQuestionsAgent:
     def test_agent_creation(self, agent):
         """Test agent initialization."""
         assert agent.agent_type == AgentType.ADAPTIVE_QUESTIONS
-        assert agent.temperature == 0.4  # Moderate temperature for creative questions
 
     def test_required_predecessors(self, agent):
         """Test required predecessor agents."""
@@ -440,7 +437,6 @@ class TestLLMPlannerAgent:
         """Test agent initialization."""
         assert agent.agent_type == AgentType.PLANNER
         assert agent.name == "LLM MLOps Planner"
-        assert agent.temperature == 0.2  # Lower temperature for consistent architecture
 
     def test_pattern_library_access(self, agent):
         """Test that LLM planner has knowledge of MLOps patterns."""

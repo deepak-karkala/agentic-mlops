@@ -144,8 +144,7 @@ Focus on practical completeness that enables confident architecture recommendati
             name="Adaptive Questions Agent",
             description="Generate targeted follow-up questions to improve constraint coverage",
             system_prompt=self.SYSTEM_PROMPT,
-            model="gpt-4-turbo-preview",
-            temperature=0.4,  # Moderate temperature for creative but focused questions
+            # model will be read from OPENAI_MODEL environment variable
         )
 
     async def get_structured_output_type(self) -> Type[AdaptiveQuestioningResult]:

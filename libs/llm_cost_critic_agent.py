@@ -176,8 +176,7 @@ Focus on major cost drivers and optimization opportunities that meaningfully imp
             name="LLM Cost Critic",
             description="LLM-powered cost analysis and budget validation",
             system_prompt=self.SYSTEM_PROMPT,
-            model="gpt-4-turbo-preview",
-            temperature=0.1,  # Very low temperature for consistent cost analysis
+            # model will be read from OPENAI_MODEL environment variable
         )
 
     async def get_structured_output_type(self) -> Type[CostCriticOutput]:

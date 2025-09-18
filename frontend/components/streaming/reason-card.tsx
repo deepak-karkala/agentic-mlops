@@ -5,7 +5,7 @@
  * alternatives considered, and structured decision outputs
  */
 
-import React from "react";
+import React, { useState } from "react";
 import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
 import {
@@ -15,6 +15,10 @@ import {
   TrendingUp,
   AlertCircle,
   CheckCircle,
+  ChevronDown,
+  ChevronRight,
+  Database,
+  FileJson,
 } from "lucide-react";
 import { ReasonCard as ReasonCardType } from "../../hooks/useStreamingEvents";
 
@@ -24,6 +28,9 @@ interface ReasonCardProps {
 }
 
 export function ReasonCard({ reasonCard, className = "" }: ReasonCardProps) {
+  const [isInputsExpanded, setIsInputsExpanded] = useState(false);
+  const [isOutputsExpanded, setIsOutputsExpanded] = useState(false);
+
   // Format timestamp
   const formatTimestamp = (timestamp: string) => {
     try {
@@ -89,6 +96,24 @@ export function ReasonCard({ reasonCard, className = "" }: ReasonCardProps) {
 
   const ConfidenceIcon = getConfidenceIcon(reasonCard.confidence);
 
+  // Enhanced JSON formatter for better readability
+  const formatStructuredData = (data: any) => {
+    if (typeof data === "string") {
+      try {
+        // Try to parse if it's a JSON string
+        const parsed = JSON.parse(data);
+        return JSON.stringify(parsed, null, 2);
+      } catch {
+        return data;
+      }
+    }
+    return JSON.stringify(data, null, 2);
+  };
+
+  // Check if we have structured data to show
+  const hasStructuredInputs = reasonCard.inputs && Object.keys(reasonCard.inputs).length > 0;
+  const hasStructuredOutputs = reasonCard.outputs && Object.keys(reasonCard.outputs).length > 0;
+
   return (
     <Card className={`p-4 space-y-3 ${className}`}>
       {/* Header */}
@@ -132,6 +157,42 @@ export function ReasonCard({ reasonCard, className = "" }: ReasonCardProps) {
           {reasonCard.reasoning}
         </p>
       </div>
+
+      {/* Structured Input Data */}
+      {hasStructuredInputs && (
+        <div>
+          <div
+            className="flex items-center space-x-2 mb-1 cursor-pointer hover:text-primary transition-colors"
+            onClick={() => setIsInputsExpanded(!isInputsExpanded)}
+          >
+            <Database className="h-4 w-4 text-blue-600" />
+            <span className="font-medium text-sm">Extracted Information</span>
+            {isInputsExpanded ? (
+              <ChevronDown className="h-3 w-3" />
+            ) : (
+              <ChevronRight className="h-3 w-3" />
+            )}
+            <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+              {Object.keys(reasonCard.inputs!).length} fields
+            </Badge>
+          </div>
+          {isInputsExpanded && (
+            <div className="pl-6">
+              <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mt-2">
+                <div className="flex items-center space-x-2 mb-2">
+                  <FileJson className="h-3 w-3 text-blue-600" />
+                  <span className="text-xs font-medium text-blue-800">
+                    Structured data extracted from user requirements:
+                  </span>
+                </div>
+                <pre className="text-xs text-blue-900 bg-white rounded border p-2 overflow-x-auto whitespace-pre-wrap">
+                  {formatStructuredData(reasonCard.inputs)}
+                </pre>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Confidence */}
       {reasonCard.confidence !== undefined && (
@@ -190,26 +251,38 @@ export function ReasonCard({ reasonCard, className = "" }: ReasonCardProps) {
         )}
 
       {/* Key Outputs */}
-      {reasonCard.outputs && Object.keys(reasonCard.outputs).length > 0 && (
+      {hasStructuredOutputs && (
         <div>
-          <div className="flex items-center space-x-2 mb-1">
+          <div
+            className="flex items-center space-x-2 mb-1 cursor-pointer hover:text-primary transition-colors"
+            onClick={() => setIsOutputsExpanded(!isOutputsExpanded)}
+          >
             <CheckCircle className="h-4 w-4 text-green-600" />
-            <span className="font-medium text-sm">Key Outputs</span>
+            <span className="font-medium text-sm">Generated Outputs</span>
+            {isOutputsExpanded ? (
+              <ChevronDown className="h-3 w-3" />
+            ) : (
+              <ChevronRight className="h-3 w-3" />
+            )}
+            <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+              {Object.keys(reasonCard.outputs!).length} outputs
+            </Badge>
           </div>
-          <div className="pl-6 space-y-1">
-            {Object.entries(reasonCard.outputs).map(([key, value]) => (
-              <div key={key} className="flex items-start space-x-2 text-sm">
-                <span className="text-muted-foreground min-w-0 flex-shrink-0">
-                  {key}:
-                </span>
-                <span className="text-foreground break-words">
-                  {typeof value === "object"
-                    ? JSON.stringify(value, null, 2)
-                    : String(value)}
-                </span>
+          {isOutputsExpanded && (
+            <div className="pl-6">
+              <div className="bg-green-50 border border-green-200 rounded-md p-3 mt-2">
+                <div className="flex items-center space-x-2 mb-2">
+                  <FileJson className="h-3 w-3 text-green-600" />
+                  <span className="text-xs font-medium text-green-800">
+                    Structured outputs generated by the agent:
+                  </span>
+                </div>
+                <pre className="text-xs text-green-900 bg-white rounded border p-2 overflow-x-auto whitespace-pre-wrap">
+                  {formatStructuredData(reasonCard.outputs)}
+                </pre>
               </div>
-            ))}
-          </div>
+            </div>
+          )}
         </div>
       )}
 

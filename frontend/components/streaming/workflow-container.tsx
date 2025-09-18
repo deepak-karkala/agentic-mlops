@@ -8,6 +8,7 @@ import React, { useState, useEffect } from "react";
 import { Activity, AlertCircle } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { WorkflowStep } from "./workflow-step";
+import { QuestionForm } from "../hitl/question-form";
 import {
   useStreamingEvents,
   ReasonCard,
@@ -44,6 +45,7 @@ export function WorkflowContainer({
     error,
     isWorkflowActive,
     isWorkflowComplete,
+    hitlState,
   } = useStreamingEvents({
     decisionSetId,
     autoConnect: true,
@@ -121,12 +123,12 @@ export function WorkflowContainer({
     );
   }, [events, reasonCards]);
 
-  // Auto-collapse completed steps when new ones start
+  // Auto-collapse only very old completed steps (keep last 3 expanded)
   useEffect(() => {
-    if (steps.length > 1) {
+    if (steps.length > 3) {
       const completedSteps = steps
         .filter((step) => step.status === "completed")
-        .slice(0, -1) // Keep the latest completed step expanded
+        .slice(0, -3) // Keep the latest 3 completed steps expanded
         .map((step) => step.id);
 
       setCollapsedSteps((prev) => new Set([...prev, ...completedSteps]));
@@ -135,14 +137,17 @@ export function WorkflowContainer({
 
   const getStepTitle = (nodeId: string): string => {
     const titles: Record<string, string> = {
-      planner: "Analyzing requirements and selecting MLOps patterns",
-      intake_extract_agent: "Extracting and structuring project requirements",
+      intake_extract: "Extracting and structuring project requirements",
+      coverage_check: "Checking requirement coverage and gaps",
+      adaptive_questions: "Generating targeted follow-up questions",
+      planner: "Analyzing requirements and designing MLOps architecture",
+      critic_tech: "Performing technical feasibility analysis",
+      critic_cost: "Analyzing costs and budget compliance",
+      policy_eval: "Evaluating architecture against policies",
+      gate_hitl: "Human-in-the-loop review gate",
       architecture_agent: "Designing system architecture",
       codegen_agent: "Generating infrastructure code",
       validation_agent: "Validating generated code",
-      coverage_check: "Checking requirement coverage",
-      adaptive_questions: "Generating follow-up questions",
-      human_in_the_loop_gate: "Waiting for human review",
     };
     return titles[nodeId] || `Processing ${nodeId.replace(/_/g, " ")}`;
   };
@@ -259,6 +264,25 @@ export function WorkflowContainer({
           />
         ))}
       </div>
+
+      {/* HITL Questions Form */}
+      {hitlState.isActive && hitlState.questions.length > 0 && (
+        <div className="mt-4">
+          <QuestionForm
+            questions={hitlState.questions}
+            smartDefaults={hitlState.smartDefaults}
+            timeoutSeconds={hitlState.countdownTime || hitlState.timeoutSeconds}
+            onSubmit={(responses) => {
+              console.log("HITL responses submitted:", responses);
+              // TODO: Send responses to backend
+            }}
+            onAutoApprove={() => {
+              console.log("HITL auto-approved with defaults");
+              // TODO: Send auto-approval to backend
+            }}
+          />
+        </div>
+      )}
 
       {/* Error Display */}
       {error && (

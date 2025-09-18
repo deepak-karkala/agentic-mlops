@@ -11,7 +11,10 @@ from langgraph.types import interrupt
 from langchain_core.messages import AIMessage, HumanMessage
 from datetime import datetime, timezone
 
-from libs.database import create_appropriate_checkpointer
+from libs.database import (
+    create_appropriate_checkpointer,
+    create_async_checkpointer,
+)
 from libs.agent_framework import (
     MLOpsWorkflowState,
     TriggerType,
@@ -104,27 +107,21 @@ def _get_llm_agents():
 
 
 def intake_extract(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
-    """Parse freeform input into Constraint Schema using LLM-powered agent."""
-    intake_extract_agent, _, _, _, _, _, _ = _get_llm_agents()
+    """Parse freeform input into the constraint schema using the LLM intake agent."""
     start = time.time()
     thread_id = state.get("decision_set_id") or state.get("project_id") or "unknown"
     logger.info("Node start: intake_extract", extra={"thread_id": thread_id})
 
+    intake_agent, *_ = _get_llm_agents()
+
     try:
-        # Execute agent directly with MLOpsWorkflowState - no conversion needed
-        result = _safe_async_run(
-            intake_extract_agent.execute(state, TriggerType.INITIAL)
-        )
+        result = _safe_async_run(intake_agent.execute(state, TriggerType.INITIAL))
 
         if result.success:
-            # Extract state updates from the agent result
             state_updates = result.state_updates
-
-            # Store reason card
             reason_cards = state.get("reason_cards", [])
             reason_cards.append(result.reason_card.model_dump())
 
-            # Update execution order
             execution_order = state.get("execution_order", [])
             execution_order.append("intake_extract")
 
@@ -141,61 +138,54 @@ def intake_extract(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
                 },
             )
             return out
-        else:
-            # Return error state
-            logger.warning(
-                "Node failure: intake_extract",
-                extra={"thread_id": thread_id, "error": result.error_message},
-            )
-            return {"constraints": {}, "error": result.error_message}
 
-    except Exception as e:
+        logger.warning(
+            "Node failure: intake_extract",
+            extra={"thread_id": thread_id, "error": result.error_message},
+        )
+        return {"constraints": {}, "error": result.error_message}
+
+    except Exception as exc:
         logger.exception(
             "Node exception: intake_extract",
-            extra={"thread_id": thread_id, "error": str(e)},
+            extra={"thread_id": thread_id, "error": str(exc)},
         )
-        return {"constraints": {}, "error": f"Intake extract agent failed: {str(e)}"}
+        return {"constraints": {}, "error": f"Intake extract agent failed: {str(exc)}"}
 
 
 def coverage_check(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
-    """Compute coverage score and emit missing/ambiguous fields using LLM-powered agent."""
-    _, coverage_check_agent, _, _, _, _, _ = _get_llm_agents()
+    """Compute coverage score and identify gaps using the LLM coverage agent."""
     start = time.time()
     thread_id = state.get("decision_set_id") or state.get("project_id") or "unknown"
     logger.info("Node start: coverage_check", extra={"thread_id": thread_id})
 
+    _, coverage_agent, *_ = _get_llm_agents()
+
     try:
-        # Execute agent directly with MLOpsWorkflowState - no conversion needed
-        result = _safe_async_run(
-            coverage_check_agent.execute(state, TriggerType.INITIAL)
-        )
+        result = _safe_async_run(coverage_agent.execute(state, TriggerType.INITIAL))
 
         if result.success:
-            # Extract state updates from the agent result
             state_updates = result.state_updates
-
-            # Store reason card
             reason_cards = state.get("reason_cards", [])
             reason_cards.append(result.reason_card.model_dump())
 
-            # Update execution order
             execution_order = state.get("execution_order", [])
             execution_order.append("coverage_check")
 
-            # Maintain backward compatibility
-            coverage_score = state_updates.get("coverage_score", 0.0)
-            coverage_analysis = state_updates.get("coverage_analysis", {})
-
-            coverage = {
-                "score": coverage_score,
-                "missing_fields": coverage_analysis.get("critical_gaps", []),
-                "ambiguous_fields": coverage_analysis.get("ambiguous_fields", []),
-                "complete": coverage_analysis.get("threshold_met", False),
-            }
+            coverage = state_updates.get("coverage")
+            if coverage is None:
+                coverage_score = state_updates.get("coverage_score", 0.0)
+                coverage_analysis = state_updates.get("coverage_analysis", {})
+                coverage = {
+                    "score": coverage_score,
+                    "missing_fields": coverage_analysis.get("critical_gaps", []),
+                    "ambiguous_fields": coverage_analysis.get("ambiguous_fields", []),
+                    "complete": coverage_analysis.get("threshold_met", False),
+                }
 
             out = {
                 **state_updates,
-                "coverage": coverage,  # Legacy compatibility
+                "coverage": coverage,
                 "reason_cards": reason_cards,
                 "execution_order": execution_order,
             }
@@ -204,31 +194,13 @@ def coverage_check(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
                 extra={
                     "thread_id": thread_id,
                     "duration_ms": int((time.time() - start) * 1000),
-                    "coverage_score": coverage_score,
                 },
             )
             return out
-        else:
-            # Return error state with defaults
-            logger.warning(
-                "Node failure: coverage_check",
-                extra={"thread_id": thread_id, "error": result.error_message},
-            )
-            return {
-                "coverage_score": 0.0,
-                "coverage": {
-                    "score": 0.0,
-                    "missing_fields": [],
-                    "ambiguous_fields": [],
-                    "complete": False,
-                },
-                "error": result.error_message,
-            }
 
-    except Exception as e:
-        logger.exception(
-            "Node exception: coverage_check",
-            extra={"thread_id": thread_id, "error": str(e)},
+        logger.warning(
+            "Node failure: coverage_check",
+            extra={"thread_id": thread_id, "error": result.error_message},
         )
         return {
             "coverage_score": 0.0,
@@ -238,13 +210,30 @@ def coverage_check(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
                 "ambiguous_fields": [],
                 "complete": False,
             },
-            "error": f"Coverage check agent failed: {str(e)}",
+            "error": result.error_message,
+        }
+
+    except Exception as exc:
+        logger.exception(
+            "Node exception: coverage_check",
+            extra={"thread_id": thread_id, "error": str(exc)},
+        )
+        return {
+            "coverage_score": 0.0,
+            "coverage": {
+                "score": 0.0,
+                "missing_fields": [],
+                "ambiguous_fields": [],
+                "complete": False,
+            },
+            "error": f"Coverage check agent failed: {str(exc)}",
         }
 
 
 def adaptive_questions(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
     """Generate follow-up questions if coverage is insufficient using LLM-powered agent."""
-    _, _, adaptive_questions_agent, _, _, _, _ = _get_llm_agents()
+    import os
+    from libs.mock_agents import enable_mock_mode, create_mock_adaptive_questions_agent
 
     # Check if questioning should continue
     coverage_score = state.get("coverage_score", 0.0)
@@ -263,6 +252,60 @@ def adaptive_questions(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
     logger.info("Node start: adaptive_questions", extra={"thread_id": thread_id})
 
     try:
+        # Use mock agent if enabled for testing
+        if enable_mock_mode():
+            logger.info("Using mock adaptive questions agent for testing")
+            mock_agent = create_mock_adaptive_questions_agent()
+            result = mock_agent.generate_mock_questions(state)
+
+            # Create mock reason card
+            reason_card = {
+                "agent": "adaptive.questions",
+                "node": "adaptive_questions",
+                "reasoning": result.questioning_rationale,
+                "decision": f"Generated {len(result.questions)} questions",
+                "confidence": 0.9,
+                "inputs": {"coverage_score": coverage_score, "state_keys": list(state.keys())},
+                "outputs": result.model_dump(),
+                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            }
+
+            # Store reason card
+            reason_cards = state.get("reason_cards", [])
+            reason_cards.append(reason_card)
+
+            # Update execution order
+            execution_order = state.get("execution_order", [])
+            execution_order.append("adaptive_questions")
+
+            out = {
+                "adaptive_questioning": {
+                    "current_coverage": result.current_coverage,
+                    "target_coverage": result.target_coverage,
+                    "questioning_complete": result.questioning_complete,
+                    "questions_generated": len(result.questions),
+                    "rationale": result.questioning_rationale,
+                    "agent_version": "mock-1.0",
+                },
+                "questioning_complete": result.questioning_complete,
+                "current_questions": [q.model_dump() for q in result.questions],
+                "reason_cards": reason_cards,
+                "execution_order": execution_order,
+            }
+
+            logger.info(
+                "Node success: adaptive_questions (mock)",
+                extra={
+                    "thread_id": thread_id,
+                    "duration_ms": int((time.time() - start) * 1000),
+                    "questions_generated": len(result.questions),
+                },
+            )
+            return out
+
+        # Use real agent for production
+        _, _, adaptive_questions_agent, _, _, _, _ = _get_llm_agents()
+
         # Execute agent directly with MLOpsWorkflowState - no conversion needed
         result = _safe_async_run(
             adaptive_questions_agent.execute(state, TriggerType.INITIAL)
@@ -343,17 +386,31 @@ def planner(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
             state_updates = result.state_updates
 
             # Create streaming reason card from agent result
+            # Map from agent_framework.ReasonCard to streaming_models.ReasonCard
+            reasoning_text = "Analyzed requirements and composed MLOps patterns into a comprehensive plan"
+            decision_text = f"Selected MLOps architecture plan"
+
+            if result.reason_card.choice and hasattr(result.reason_card.choice, 'rationale'):
+                reasoning_text = result.reason_card.choice.rationale
+            if result.reason_card.choice and hasattr(result.reason_card.choice, 'selection'):
+                decision_text = f"Selected: {result.reason_card.choice.selection}"
+
+            # Get alternatives from candidates if available
+            alternatives = []
+            if result.reason_card.candidates:
+                alternatives = [candidate.name for candidate in result.reason_card.candidates]
+
             streaming_reason_card = create_reason_card(
                 agent="planner",
                 node="planner",
                 decision_set_id=thread_id,
-                reasoning=result.reason_card.reasoning,
-                decision=result.reason_card.decision,
+                reasoning=reasoning_text,
+                decision=decision_text,
                 category="pattern-selection",
                 confidence=result.reason_card.confidence,
                 inputs=result.reason_card.inputs,
                 outputs=result.reason_card.outputs,
-                alternatives_considered=result.reason_card.alternatives_considered,
+                alternatives_considered=alternatives,
                 priority="high",
             )
 
@@ -475,18 +532,32 @@ def critic_tech(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
             # Extract state updates from the agent result
             state_updates = result.state_updates
 
-            # Create and emit streaming reason card
+            # Create streaming reason card from agent result
+            # Map from agent_framework.ReasonCard to streaming_models.ReasonCard
+            reasoning_text = "Analyzed technical feasibility and identified potential bottlenecks"
+            decision_text = f"Technical assessment completed"
+
+            if result.reason_card.choice and hasattr(result.reason_card.choice, 'rationale'):
+                reasoning_text = result.reason_card.choice.rationale
+            if result.reason_card.choice and hasattr(result.reason_card.choice, 'selection'):
+                decision_text = f"Assessment: {result.reason_card.choice.selection}"
+
+            # Get alternatives from candidates if available
+            alternatives = []
+            if result.reason_card.candidates:
+                alternatives = [candidate.name for candidate in result.reason_card.candidates]
+
             streaming_reason_card = create_reason_card(
                 agent="tech_critic",
                 node="critic_tech",
                 decision_set_id=thread_id,
-                reasoning=result.reason_card.reasoning,
-                decision=result.reason_card.decision,
+                reasoning=reasoning_text,
+                decision=decision_text,
                 category="technical-analysis",
                 confidence=result.reason_card.confidence,
                 inputs=result.reason_card.inputs,
                 outputs=result.reason_card.outputs,
-                alternatives_considered=result.reason_card.alternatives_considered,
+                alternatives_considered=alternatives,
                 priority="high",
             )
             _safe_async_run(streaming_service.emit_reason_card(streaming_reason_card))
@@ -578,18 +649,32 @@ def critic_cost(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
             # Extract state updates from the agent result
             state_updates = result.state_updates
 
-            # Create and emit streaming reason card
+            # Create streaming reason card from agent result
+            # Map from agent_framework.ReasonCard to streaming_models.ReasonCard
+            reasoning_text = "Analyzed cost estimates and resource requirements"
+            decision_text = f"Cost analysis completed"
+
+            if result.reason_card.choice and hasattr(result.reason_card.choice, 'rationale'):
+                reasoning_text = result.reason_card.choice.rationale
+            if result.reason_card.choice and hasattr(result.reason_card.choice, 'selection'):
+                decision_text = f"Cost assessment: {result.reason_card.choice.selection}"
+
+            # Get alternatives from candidates if available
+            alternatives = []
+            if result.reason_card.candidates:
+                alternatives = [candidate.name for candidate in result.reason_card.candidates]
+
             streaming_reason_card = create_reason_card(
                 agent="cost_critic",
                 node="critic_cost",
                 decision_set_id=thread_id,
-                reasoning=result.reason_card.reasoning,
-                decision=result.reason_card.decision,
+                reasoning=reasoning_text,
+                decision=decision_text,
                 category="cost-analysis",
                 confidence=result.reason_card.confidence,
                 inputs=result.reason_card.inputs,
                 outputs=result.reason_card.outputs,
-                alternatives_considered=result.reason_card.alternatives_considered,
+                alternatives_considered=alternatives,
                 priority="high",
             )
             _safe_async_run(streaming_service.emit_reason_card(streaming_reason_card))
@@ -685,18 +770,32 @@ def policy_eval(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
             # Extract state updates from the agent result
             state_updates = result.state_updates
 
-            # Create and emit streaming reason card
+            # Create streaming reason card from agent result
+            # Map from agent_framework.ReasonCard to streaming_models.ReasonCard
+            reasoning_text = "Evaluated governance and compliance policies"
+            decision_text = f"Policy evaluation completed"
+
+            if result.reason_card.choice and hasattr(result.reason_card.choice, 'rationale'):
+                reasoning_text = result.reason_card.choice.rationale
+            if result.reason_card.choice and hasattr(result.reason_card.choice, 'selection'):
+                decision_text = f"Policy decision: {result.reason_card.choice.selection}"
+
+            # Get alternatives from candidates if available
+            alternatives = []
+            if result.reason_card.candidates:
+                alternatives = [candidate.name for candidate in result.reason_card.candidates]
+
             streaming_reason_card = create_reason_card(
                 agent="policy_engine",
                 node="policy_eval",
                 decision_set_id=thread_id,
-                reasoning=result.reason_card.reasoning,
-                decision=result.reason_card.decision,
+                reasoning=reasoning_text,
+                decision=decision_text,
                 category="policy-evaluation",
                 confidence=result.reason_card.confidence,
                 inputs=result.reason_card.inputs,
                 outputs=result.reason_card.outputs,
-                alternatives_considered=result.reason_card.alternatives_considered,
+                alternatives_considered=alternatives,
                 priority="critical",
             )
             _safe_async_run(streaming_service.emit_reason_card(streaming_reason_card))
@@ -1169,6 +1268,84 @@ def call_llm(state: MessagesState) -> MessagesState:
 
 def build_full_graph() -> Pregel:
     """
+    Build and compile the full MLOps workflow graph with real agent implementations and dual HITL gates.
+
+    This creates the complete deterministic sequential graph as specified in
+    implementation_details.md section 21.1, enhanced with two HITL interaction points:
+    1. After adaptive_questions: hitl_gate_input - for capturing missing inputs
+    2. After policy_eval: hitl_gate_final - for final approval before code generation
+
+    Returns:
+        Compiled StateGraph ready for execution
+    """
+    graph = StateGraph(MLOpsWorkflowState)
+
+    # Add all agent nodes in the order specified in section 21.1
+    graph.add_node("intake_extract", intake_extract_enhanced)  # Use enhanced version for HITL support
+    graph.add_node("coverage_check", coverage_check_enhanced)  # Use enhanced version for HITL support
+    graph.add_node("adaptive_questions", adaptive_questions)
+    graph.add_node("hitl_gate_input", hitl_gate_user)  # First HITL gate: capture missing inputs
+    graph.add_node("planner", planner)  # Now uses real PlannerAgent
+    graph.add_node("critic_tech", critic_tech)  # Now uses real TechCriticAgent
+    graph.add_node("critic_cost", critic_cost)  # Now uses real CostCriticAgent
+    graph.add_node("policy_eval", policy_eval)  # Now uses real PolicyEngineAgent
+    graph.add_node("hitl_gate_final", gate_hitl)  # Second HITL gate: final approval before codegen
+    graph.add_node("codegen", codegen)
+    graph.add_node("validators", validators)
+    graph.add_node("rationale_compile", rationale_compile)
+    graph.add_node("diff_and_persist", diff_and_persist)
+
+    # Define the execution flow with dual HITL gates
+    graph.add_edge(START, "intake_extract")
+    graph.add_edge("intake_extract", "coverage_check")
+    graph.add_edge("coverage_check", "adaptive_questions")
+
+    # First HITL gate: Always trigger after adaptive_questions for now (simplified logic)
+    graph.add_edge("adaptive_questions", "hitl_gate_input")
+
+    # From input HITL gate, conditionally loop back or continue
+    #graph.add_conditional_edges(
+    #    "hitl_gate_input",
+    #    should_loop_back_to_intake,
+    #    {
+    #        "loop_back": "intake_extract",
+    #        "continue": "planner"
+    #    }
+    #)
+
+    graph.add_edge("hitl_gate_input", "intake_extract")
+    graph.add_edge("intake_extract", "planner")
+
+
+    # Continue with planning and criticism phase
+    graph.add_edge("planner", "critic_tech")
+    graph.add_edge("critic_tech", "critic_cost")
+    graph.add_edge("critic_cost", "policy_eval")
+
+    # Second HITL gate: final approval before code generation
+    graph.add_edge("policy_eval", "hitl_gate_final")
+    graph.add_edge("hitl_gate_final", "codegen")
+    graph.add_edge("codegen", "validators")
+    graph.add_edge("validators", "rationale_compile")
+    graph.add_edge("rationale_compile", "diff_and_persist")
+    graph.add_edge("diff_and_persist", END)
+
+    # Prefer async-compatible checkpointer when available
+    checkpointer = _safe_async_run(create_async_checkpointer())
+    if checkpointer is None:
+        # Fall back to synchronous checkpointer (e.g., PostgresSaver)
+        checkpointer = create_appropriate_checkpointer()
+
+    # Compile with checkpointer if available
+    if checkpointer:
+        return graph.compile(checkpointer=checkpointer)
+    else:
+        # No checkpointer available - compile without persistence
+        return graph.compile()
+
+
+def build_hitl_graph() -> Pregel:
+    """
     Build and compile the full MLOps workflow graph with real agent implementations.
 
     This creates the complete deterministic sequential graph as specified in
@@ -1185,33 +1362,22 @@ def build_full_graph() -> Pregel:
     graph.add_node("intake_extract", intake_extract)
     graph.add_node("coverage_check", coverage_check)
     graph.add_node("adaptive_questions", adaptive_questions)
-    graph.add_node("planner", planner)  # Now uses real PlannerAgent
-    graph.add_node("critic_tech", critic_tech)  # Now uses real TechCriticAgent
-    graph.add_node("critic_cost", critic_cost)  # Now uses real CostCriticAgent
-    graph.add_node("policy_eval", policy_eval)  # Now uses real PolicyEngineAgent
     graph.add_node("gate_hitl", gate_hitl)
-    graph.add_node("codegen", codegen)
-    graph.add_node("validators", validators)
-    graph.add_node("rationale_compile", rationale_compile)
-    graph.add_node("diff_and_persist", diff_and_persist)
+    graph.add_node("planner", planner)  # Now uses real PlannerAgent
 
     # Define the sequential execution flow with normal edges
     graph.add_edge(START, "intake_extract")
     graph.add_edge("intake_extract", "coverage_check")
     graph.add_edge("coverage_check", "adaptive_questions")
-    graph.add_edge("adaptive_questions", "planner")
-    graph.add_edge("planner", "critic_tech")
-    graph.add_edge("critic_tech", "critic_cost")
-    graph.add_edge("critic_cost", "policy_eval")
-    graph.add_edge("policy_eval", "gate_hitl")
-    graph.add_edge("gate_hitl", "codegen")
-    graph.add_edge("codegen", "validators")
-    graph.add_edge("validators", "rationale_compile")
-    graph.add_edge("rationale_compile", "diff_and_persist")
-    graph.add_edge("diff_and_persist", END)
+    graph.add_edge("adaptive_questions", "gate_hitl")
+    graph.add_edge("gate_hitl", "planner")
+    graph.add_edge("planner", END)
 
-    # Create appropriate checkpointer based on environment
-    checkpointer = create_appropriate_checkpointer()
+    # Prefer async-compatible checkpointer when available
+    checkpointer = _safe_async_run(create_async_checkpointer())
+    if checkpointer is None:
+        # Fall back to synchronous checkpointer (e.g., PostgresSaver)
+        checkpointer = create_appropriate_checkpointer()
 
     # Compile with checkpointer if available
     if checkpointer:
@@ -1221,30 +1387,596 @@ def build_full_graph() -> Pregel:
         return graph.compile()
 
 
-def build_streaming_test_graph() -> Pregel:
+def build_hitl_enhanced_graph() -> Pregel:
     """
-    Build a simplified graph with only the intake_extract agent for streaming testing.
+    Build enhanced HITL graph with auto-approval and loop-back functionality.
 
-    This creates a minimal graph that runs only the Intake Extract Agent,
-    designed to test LangGraph native streaming capabilities without
-    the complexity of the full workflow.
+    Flow: intake_extract -> coverage_check -> adaptive_questions -> hitl_gate_user
+          -> intake_extract (update) -> coverage_check (update) -> planner
+
+    Features:
+    - Smart defaults generation for questions
+    - Auto-approval with configurable timeout
+    - In-place state updates (no duplicate reason cards)
+    - Context preservation across agent re-execution
 
     Returns:
-        Compiled StateGraph ready for streaming execution
+        Compiled StateGraph ready for execution
     """
+    graph = StateGraph(MLOpsWorkflowState)
+
+    # Add enhanced node functions
+    graph.add_node("intake_extract", intake_extract_enhanced)
+    graph.add_node("coverage_check", coverage_check_enhanced)
+    graph.add_node("adaptive_questions", adaptive_questions)
+    graph.add_node("hitl_gate_user", hitl_gate_user)
+    graph.add_node("planner", planner)
+
+    # Define the flow with conditional routing
+    graph.add_edge(START, "intake_extract")
+    graph.add_edge("intake_extract", "coverage_check")
+    graph.add_edge("coverage_check", "adaptive_questions")
+    graph.add_edge("adaptive_questions", "hitl_gate_user")
+
+    # Conditional edge from hitl_gate_user based on whether we need to loop back
+    graph.add_conditional_edges(
+        "hitl_gate_user",
+        should_loop_back_to_intake,
+        {
+            "loop_back": "intake_extract",
+            "continue": "planner"
+        }
+    )
+    graph.add_edge("planner", END)
+
+    # Use checkpointer for workflow interruption/resumption
+    checkpointer = _safe_async_run(create_async_checkpointer())
+    if checkpointer is None:
+        checkpointer = create_appropriate_checkpointer()
+
+    # Compile with checkpointer if available
+    if checkpointer:
+        return graph.compile(checkpointer=checkpointer)
+    else:
+        return graph.compile()
+
+
+# Enhanced HITL Functions
+
+
+def should_trigger_input_hitl(state: MLOpsWorkflowState) -> bool:
+    """
+    Determine if we should trigger the input HITL gate after adaptive_questions.
+
+    Returns True if:
+    - Questions were generated (need user input)
+    - Coverage is below threshold
+    - Confidence is low
+    """
+    # Check if adaptive_questions generated questions
+    last_message = state.get("messages", [])[-1] if state.get("messages") else None
+    if last_message and hasattr(last_message, 'content'):
+        # Look for questions in the message or state
+        if 'questions' in str(last_message.content).lower():
+            return True
+
+    # Check coverage and confidence from recent context
+    context = state.get("context", {})
+    coverage_score = context.get("coverage_score", 1.0)
+    extraction_confidence = context.get("extraction_confidence", 1.0)
+
+    # Trigger HITL if coverage is low or confidence is low
+    if coverage_score < 0.8 or extraction_confidence < 0.5:
+        return True
+
+    return False
+
+
+def should_loop_back_to_intake(state: MLOpsWorkflowState) -> str:
+    """
+    Determine if we should loop back to intake_extract or continue to planner.
+
+    Args:
+        state: Current workflow state
+
+    Returns:
+        "loop_back" if we need to re-run intake with user responses
+        "continue" if we should proceed to planner
+    """
+    # Check if we have user responses from HITL gate
+    user_responses = state.get("user_responses", [])
+    execution_round = state.get("execution_round", 1)
+
+    # If we have user responses and this is the first round, loop back
+    if user_responses and execution_round == 1:
+        return "loop_back"
+
+    # Otherwise continue to planner
+    return "continue"
+
+
+def generate_smart_defaults(questions: list, context: dict) -> dict:
+    """
+    Generate intelligent default answers for adaptive questions.
+
+    Args:
+        questions: List of adaptive questions
+        context: Current project context for informed defaults
+
+    Returns:
+        Dictionary mapping question_id to default answer
+    """
+    defaults = {}
+
+    for question in questions:
+        question_id = question.get("question_id", "")
+        question_type = question.get("question_type", "text")
+        question_text = question.get("question_text", "")
+        field_targets = question.get("field_targets", [])
+
+        # Generate context-aware defaults
+        if question_type == "choice":
+            choices = question.get("choices", [])
+            if choices:
+                # Default to first choice or middle choice for safety
+                defaults[question_id] = choices[0]
+        elif question_type == "numeric":
+            # Generate reasonable numeric defaults based on field type
+            if "budget" in question_text.lower():
+                defaults[question_id] = "1000"  # $1000/month default
+            elif "scale" in question_text.lower() or "request" in question_text.lower():
+                defaults[question_id] = "10000"  # 10k requests/day default
+            else:
+                defaults[question_id] = "100"  # Generic numeric default
+        elif question_type == "boolean":
+            # Default to conservative/safe choices
+            if "complian" in question_text.lower() or "regulat" in question_text.lower():
+                defaults[question_id] = "true"  # Default to compliance
+            else:
+                defaults[question_id] = "false"  # Conservative default
+        else:  # text type
+            # Generate contextual text defaults
+            if "region" in question_text.lower():
+                defaults[question_id] = "us-east-1"
+            elif "team" in question_text.lower():
+                defaults[question_id] = "small development team (2-5 people)"
+            elif "use case" in question_text.lower():
+                defaults[question_id] = "machine learning model serving and inference"
+            else:
+                defaults[question_id] = "standard configuration"
+
+    return defaults
+
+
+def hitl_gate_user(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
+    """
+    Enhanced HITL gate with auto-approval and smart defaults.
+
+    Presents questions with intelligent defaults, auto-approves after timeout,
+    and collects user responses for workflow enhancement.
+    """
+    import os
+    import time
+    from libs.streaming_service import get_streaming_service
+
+    thread_id = state.get("decision_set_id") or state.get("project_id") or "unknown"
+    logger.info("Node start: hitl_gate_user", extra={"thread_id": thread_id})
+
+    # Get current questions from adaptive_questions agent
+    current_questions = state.get("current_questions", [])
+    if not current_questions:
+        logger.info("No questions to present, skipping HITL gate")
+        return {"user_responses": [], "execution_round": 2}
+
+    # Get configuration
+    hitl_mode = os.getenv("HITL_MODE", "demo")  # demo, interactive, disabled
+    timeout_seconds = int(os.getenv("HITL_DEFAULT_TIMEOUT", "8"))
+
+    if hitl_mode == "demo":
+        timeout_seconds = 3
+    elif hitl_mode == "interactive":
+        timeout_seconds = 15
+    elif hitl_mode == "disabled":
+        timeout_seconds = 0
+
+    # Generate smart defaults
+    project_context = {
+        "constraints": state.get("constraints", {}),
+        "coverage_score": state.get("coverage_score", 0.0),
+        "user_input": state.get("constraints", {}).get("project_description", "")
+    }
+    smart_defaults = generate_smart_defaults(current_questions, project_context)
+
+    # Get streaming service for real-time updates
+    streaming_service = get_streaming_service()
+
+    # Emit questions presented event
+    _safe_async_run(
+        streaming_service.emit_questions_presented(
+            thread_id,
+            current_questions,
+            smart_defaults,
+            timeout_seconds,
+            "hitl_gate_user",
+        )
+    )
+
+    # Create interruption payload with questions and defaults
+    interruption_payload = {
+        "questions": current_questions,
+        "smart_defaults": smart_defaults,
+        "timeout_seconds": timeout_seconds,
+        "auto_approval_enabled": timeout_seconds > 0,
+        "message": f"Please review these questions. Auto-approving defaults in {timeout_seconds} seconds.",
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+
+    # Handle different modes
+    if timeout_seconds == 0:
+        # Immediate auto-approval mode
+        user_responses = []
+        for question in current_questions:
+            question_id = question.get("question_id", "")
+            default_answer = smart_defaults.get(question_id, "")
+            user_responses.append({
+                "question_id": question_id,
+                "answer": default_answer,
+                "approval_method": "auto_immediate",
+                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            })
+
+        logger.info(f"Immediate auto-approval: {len(user_responses)} responses generated")
+        return {
+            "user_responses": user_responses,
+            "execution_round": 2,
+            "hitl_result": {
+                "status": "auto_approved",
+                "approval_method": "immediate",
+                "timeout_seconds": 0,
+            }
+        }
+
+    # Interrupt workflow for user interaction with timeout
+    logger.info(
+        f"HITL gate presenting {len(current_questions)} questions with {timeout_seconds}s timeout"
+    )
+
+    # The interrupt will pause execution and wait for user input or timeout
+    user_input_data = interrupt(interruption_payload)
+
+    # Process user responses or use defaults
+    user_responses = []
+    approval_method = "user_input"
+
+    if user_input_data is None or user_input_data.get("timed_out", False):
+        # Auto-approval with defaults
+        approval_method = "auto_approved"
+        for question in current_questions:
+            question_id = question.get("question_id", "")
+            default_answer = smart_defaults.get(question_id, "")
+            user_responses.append({
+                "question_id": question_id,
+                "answer": default_answer,
+                "approval_method": "auto_timeout",
+                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            })
+        logger.info(f"Auto-approved {len(user_responses)} responses after timeout")
+    else:
+        # User provided responses
+        user_answers = user_input_data.get("responses", {})
+        for question in current_questions:
+            question_id = question.get("question_id", "")
+            user_answer = user_answers.get(question_id, smart_defaults.get(question_id, ""))
+            user_responses.append({
+                "question_id": question_id,
+                "answer": user_answer,
+                "approval_method": "user_input",
+                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            })
+        logger.info(f"User provided {len(user_responses)} responses")
+
+    # Emit responses collected event
+    _safe_async_run(
+        streaming_service.emit_responses_collected(
+            thread_id,
+            user_responses,
+            approval_method,
+            "hitl_gate_user",
+        )
+    )
+
+    # Emit node completion
+    _safe_async_run(
+        streaming_service.emit_node_complete(
+            thread_id,
+            "hitl_gate_user",
+            outputs={
+                "responses_count": len(user_responses),
+                "approval_method": approval_method,
+            },
+            message=f"HITL gate completed via {approval_method}",
+        )
+    )
+
+    return {
+        "user_responses": user_responses,
+        "execution_round": 2,
+        "hitl_result": {
+            "status": approval_method,
+            "responses_count": len(user_responses),
+            "timeout_seconds": timeout_seconds,
+        }
+    }
+
+
+def intake_extract_enhanced(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
+    """
+    Enhanced intake_extract that supports in-place updates and context merging.
+
+    On first execution: Normal intake extraction
+    On second execution: Merge user responses with existing context, update in-place
+    """
+    start = time.time()
+    thread_id = state.get("decision_set_id") or state.get("project_id") or "unknown"
+    execution_round = state.get("execution_round", 1)
+
+    logger.info(
+        f"Node start: intake_extract_enhanced (round {execution_round})",
+        extra={"thread_id": thread_id}
+    )
+
+    # Get user responses if this is the second round
+    user_responses = state.get("user_responses", [])
+
+    if execution_round >= 2 and user_responses:
+        # Second execution: merge user responses with existing context
+        return _merge_user_responses_with_context(state, user_responses, start, thread_id)
+    else:
+        # First execution: normal intake extraction
+        return _execute_normal_intake(state, start, thread_id)
+
+
+def _merge_user_responses_with_context(state: MLOpsWorkflowState, user_responses: list, start: float, thread_id: str) -> MLOpsWorkflowState:
+    """Merge user responses with existing context and update state in-place."""
+    # Get existing constraints and context
+    existing_constraints = state.get("constraints", {})
+    original_description = existing_constraints.get("project_description", "")
+
+    # Build enhanced context from user responses
+    response_text = "\n\nAdditional details provided by user:\n"
+    for response in user_responses:
+        question_id = response.get("question_id", "")
+        answer = response.get("answer", "")
+        approval_method = response.get("approval_method", "")
+
+        # Find the original question for context
+        current_questions = state.get("current_questions", [])
+        question_text = question_id  # fallback
+        for q in current_questions:
+            if q.get("question_id") == question_id:
+                question_text = q.get("question_text", question_id)
+                break
+
+        response_text += f"- {question_text}: {answer}"
+        if approval_method.startswith("auto"):
+            response_text += " (auto-approved default)"
+        response_text += "\n"
+
+    # Create enhanced project description
+    enhanced_description = original_description + response_text
+
+    # Update constraints with enhanced context
+    enhanced_constraints = {
+        **existing_constraints,
+        "project_description": enhanced_description,
+        "user_responses_integrated": True,
+        "response_integration_method": "context_merge"
+    }
+
+    # Find and update existing reason card in-place instead of creating new one
+    reason_cards = state.get("reason_cards", [])
+    intake_card_index = None
+
+    for i, card in enumerate(reason_cards):
+        if card.get("agent") == "intake.extract" or card.get("node") == "intake_extract":
+            intake_card_index = i
+            break
+
+    if intake_card_index is not None:
+        # Update existing reason card
+        existing_card = reason_cards[intake_card_index]
+        updated_card = {
+            **existing_card,
+            "inputs": {
+                **existing_card.get("inputs", {}),
+                "enhanced_context": enhanced_description,
+                "user_responses": user_responses,
+                "execution_round": 2
+            },
+            "outputs": {
+                **existing_card.get("outputs", {}),
+                "constraints": enhanced_constraints,
+                "integration_status": "user_responses_integrated"
+            },
+            "reasoning": existing_card.get("reasoning", "") + f"\n\nRound 2: Integrated {len(user_responses)} user responses to enhance context.",
+            "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+        reason_cards[intake_card_index] = updated_card
+        logger.info(f"Updated existing intake reason card with user responses")
+    else:
+        # Fallback: create new reason card if original not found
+        logger.warning("Original intake reason card not found, creating new one")
+        new_card = {
+            "agent": "intake.extract",
+            "node": "intake_extract",
+            "execution_round": 2,
+            "inputs": {"enhanced_context": enhanced_description, "user_responses": user_responses},
+            "outputs": {"constraints": enhanced_constraints},
+            "reasoning": f"Enhanced context with {len(user_responses)} user responses",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+        reason_cards.append(new_card)
+
+    logger.info(
+        "Node success: intake_extract_enhanced (round 2)",
+        extra={
+            "thread_id": thread_id,
+            "duration_ms": int((time.time() - start) * 1000),
+            "responses_integrated": len(user_responses),
+        },
+    )
+
+    return {
+        "constraints": enhanced_constraints,
+        "reason_cards": reason_cards,
+        "execution_order": state.get("execution_order", []),  # Don't add duplicate entry
+        "user_responses_processed": True,
+    }
+
+
+def _execute_normal_intake(state: MLOpsWorkflowState, start: float, thread_id: str) -> MLOpsWorkflowState:
+    """Execute normal intake extraction (first round)."""
+    # Use the existing intake_extract function
+    result = intake_extract(state)
+
+    # Add execution round tracking
+    result["execution_round"] = 1
+
+    logger.info(
+        "Node success: intake_extract_enhanced (round 1)",
+        extra={
+            "thread_id": thread_id,
+            "duration_ms": int((time.time() - start) * 1000),
+        },
+    )
+
+    return result
+
+
+def coverage_check_enhanced(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
+    """
+    Enhanced coverage_check that supports in-place updates.
+
+    On second execution: Update existing reason card instead of creating new one
+    """
+    start = time.time()
+    thread_id = state.get("decision_set_id") or state.get("project_id") or "unknown"
+    execution_round = state.get("execution_round", 1)
+
+    logger.info(
+        f"Node start: coverage_check_enhanced (round {execution_round})",
+        extra={"thread_id": thread_id}
+    )
+
+    # Execute normal coverage check
+    result = coverage_check(state)
+
+    if execution_round >= 2:
+        # Second execution: update existing reason card in-place
+        reason_cards = result.get("reason_cards", [])
+        coverage_card_indices = []
+
+        # Find all coverage check reason cards
+        for i, card in enumerate(reason_cards):
+            if card.get("agent") == "coverage.check" or card.get("node") == "coverage_check":
+                coverage_card_indices.append(i)
+
+        if len(coverage_card_indices) > 1:
+            # We have multiple coverage cards, update the first and remove duplicates
+            first_card_index = coverage_card_indices[0]
+            existing_card = reason_cards[first_card_index]
+
+            # Update the first card with new results
+            updated_card = {
+                **existing_card,
+                "inputs": {
+                    **existing_card.get("inputs", {}),
+                    "enhanced_constraints": state.get("constraints", {}),
+                    "execution_round": execution_round,
+                },
+                "outputs": {
+                    **result.get("coverage", {}),
+                    "updated_after_user_input": True,
+                },
+                "reasoning": existing_card.get("reasoning", "") + f"\n\nRound {execution_round}: Re-evaluated coverage after user input integration.",
+                "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            }
+
+            # Remove duplicate cards and keep only the updated one
+            new_reason_cards = []
+            for i, card in enumerate(reason_cards):
+                if i == first_card_index:
+                    new_reason_cards.append(updated_card)
+                elif i not in coverage_card_indices[1:]:  # Skip other coverage cards
+                    new_reason_cards.append(card)
+
+            result["reason_cards"] = new_reason_cards
+            logger.info(f"Updated existing coverage reason card, removed {len(coverage_card_indices) - 1} duplicates")
+
+    logger.info(
+        f"Node success: coverage_check_enhanced (round {execution_round})",
+        extra={
+            "thread_id": thread_id,
+            "duration_ms": int((time.time() - start) * 1000),
+        },
+    )
+
+    return result
+
+
+def build_streaming_test_graph() -> Pregel:
+    """Build a minimal two-node graph to validate real-time streaming."""
     from langgraph.graph import StateGraph, START, END
 
     graph = StateGraph(MLOpsWorkflowState)
 
-    # Add only the intake extract agent
-    graph.add_node("intake_extract", intake_extract)
+    def intake_with_codegen_prep(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
+        """Run intake and populate minimal plan/approval required for codegen."""
+        updates = intake_extract(state)
 
-    # Simple linear flow: START -> intake_extract -> END
+        plan = updates.get("plan") or {
+            "pattern_name": "streaming-test-app-runner",
+            "architecture_type": "app_runner",
+            "key_services": {
+                "api_service": "FastAPI application deployed on AWS App Runner",
+                "infra": "Terraform modules for networking, App Runner, and RDS",
+                "observability": "CloudWatch dashboards and alarms",
+            },
+            "implementation_phases": [
+                "project_scaffolding",
+                "infrastructure_definition",
+                "application_bootstrap",
+                "ci_cd_pipeline",
+            ],
+            "estimated_monthly_cost": 500,
+        }
+
+        hitl = updates.get("hitl") or {
+            "status": "approved",
+            "comment": "Auto-approved for streaming test",
+            "approved_by": "system",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+
+        return {
+            **updates,
+            "plan": plan,
+            "hitl": hitl,
+        }
+
+    # Add two nodes for quick streaming/codegen validation
+    graph.add_node("intake_extract", intake_with_codegen_prep)
+    graph.add_node("codegen", codegen)
+
+    # Sequential flow with two agents
     graph.add_edge(START, "intake_extract")
-    graph.add_edge("intake_extract", END)
+    graph.add_edge("intake_extract", "codegen")
+    graph.add_edge("codegen", END)
 
-    # Create checkpointer for state persistence
-    checkpointer = create_appropriate_checkpointer()
+    # Prefer async-compatible checkpointer when available to support astream()
+    checkpointer = _safe_async_run(create_async_checkpointer())
+    if checkpointer is None:
+        checkpointer = create_appropriate_checkpointer()
 
     # Compile with checkpointer if available
     if checkpointer:
@@ -1275,8 +2007,10 @@ def build_thin_graph() -> Pregel:
     graph.add_edge(START, "call_llm")
     graph.add_edge("call_llm", END)
 
-    # Create appropriate checkpointer based on environment
-    checkpointer = create_appropriate_checkpointer()
+    # Prefer async-compatible checkpointer when available
+    checkpointer = _safe_async_run(create_async_checkpointer())
+    if checkpointer is None:
+        checkpointer = create_appropriate_checkpointer()
 
     # Compile with checkpointer if available
     if checkpointer:

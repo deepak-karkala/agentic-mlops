@@ -29,9 +29,11 @@ export default function Home() {
           </p>
         </header>
 
-        {/* Full-width Chat Interface */}
-        <div className="flex-1 overflow-hidden">
-          <EnhancedChatInterface />
+        {/* Responsive Chat Interface Container */}
+        <div className="flex-1 overflow-hidden flex justify-center">
+          <div className="w-full max-w-4xl">
+            <EnhancedChatInterface />
+          </div>
         </div>
       </div>
     </main>

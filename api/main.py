@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 import logging
 import time
 
-from libs.graph import build_full_graph, build_thin_graph, build_streaming_test_graph
+from libs.graph import build_full_graph, build_thin_graph, build_streaming_test_graph, build_hitl_graph, build_hitl_enhanced_graph
 from libs.job_service import JobService, create_decision_set_for_thread
 from libs.database import create_database_engine, create_session_maker
 from libs.models import JobStatus, Job, DecisionSet
@@ -26,12 +26,54 @@ load_dotenv()
 
 app = FastAPI()
 
-# Configure logging (API)
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
+# Configure structured logging (Issue #16)
+# Enhanced format for CloudWatch logs with run_id and thread_id correlation
+log_format = "%(asctime)s %(levelname)s %(name)s %(message)s"
+if os.getenv("ENVIRONMENT") == "production":
+    # CloudWatch-friendly JSON structured logging for production
+    import json
+    import logging.config
+
+    LOGGING_CONFIG = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "json": {
+                "format": "%(asctime)s %(name)s %(levelname)s %(message)s",
+                "class": "pythonjsonlogger.jsonlogger.JsonFormatter",
+            },
+            "default": {
+                "format": log_format,
+            },
+        },
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler",
+                "formatter": "json" if os.getenv("ENVIRONMENT") == "production" else "default",
+                "stream": "ext://sys.stdout",
+            },
+        },
+        "root": {
+            "level": os.getenv("LOG_LEVEL", "INFO"),
+            "handlers": ["console"],
+        },
+    }
+
+    try:
+        logging.config.dictConfig(LOGGING_CONFIG)
+    except ImportError:
+        # Fallback to basic logging if pythonjsonlogger is not available
+        logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format=log_format)
+else:
+    # Development: simple formatted logs
+    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format=log_format)
+
 logger = logging.getLogger(__name__)
+
+# Configure LangSmith tracing (Issue #16)
+# LangSmith will automatically be enabled if LANGCHAIN_TRACING_V2=true in environment
+if os.getenv("LANGCHAIN_TRACING_V2"):
+    logger.info("LangSmith tracing enabled for project: %s", os.getenv("LANGCHAIN_PROJECT", "agentic-mlops"))
 
 # CORS configuration based on environment
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
@@ -127,8 +169,14 @@ try:
         logger.info("Initializing full graph with agent reasoning and streaming")
         _graph = build_full_graph()
     elif GRAPH_TYPE == "streaming_test":
-        logger.info("Initializing streaming test graph with only intake_extract agent")
+        logger.info("Initializing streaming test graph with 2-agent workflow for debugging: intake_extract (30s sleep) → coverage_check (60s sleep)")
         _graph = build_streaming_test_graph()
+    elif GRAPH_TYPE == "hitl":
+        logger.info("Initializing HITL graph for Human-in-the-Loop testing: intake_extract → coverage_check → adaptive_questions → gate_hitl → planner")
+        _graph = build_hitl_graph()
+    elif GRAPH_TYPE == "hitl_enhanced":
+        logger.info("Initializing Enhanced HITL graph with auto-approval and loop-back: intake_extract → coverage_check → adaptive_questions → hitl_gate_user → loop-back or continue → planner")
+        _graph = build_hitl_enhanced_graph()
     else:
         logger.info("Initializing thin graph for fast development")
         _graph = build_thin_graph()
@@ -460,6 +508,7 @@ async def stream_workflow_progress(decision_set_id: str, db: Session = Depends(g
         """
         try:
             import json as _json
+            from fastapi.encoders import jsonable_encoder
 
             logger.info(
                 f"Starting SSE event generator for decision_set_id: {decision_set_id}"
@@ -479,7 +528,11 @@ async def stream_workflow_progress(decision_set_id: str, db: Session = Depends(g
                 if event.message:
                     payload["message"] = event.message
 
-                out = {"event": event.event_type.value, "data": _json.dumps(payload)}
+                serialized_payload = jsonable_encoder(payload)
+                out = {
+                    "event": event.event_type.value,
+                    "data": _json.dumps(serialized_payload),
+                }
                 logger.info(f"SSE yielding event #{event_count}: {event.event_type}")
                 yield out
 
@@ -738,11 +791,16 @@ class IntegratedWorkerService:
         # Use decision_set_id for streaming events (this is what frontend SSE uses)
         decision_set_id = job.decision_set_id
 
+        # Generate run_id for correlation in logs and LangSmith (Issue #16)
+        run_id = str(uuid.uuid4())
+
         if not thread_id:
             raise ValueError("Job payload missing required thread_id")
 
+        # Structured logging with run_id and thread_id for CloudWatch correlation (Issue #16)
         logger.info(
-            f"Processing ML workflow for thread {thread_id}, decision_set {decision_set_id}"
+            f"Processing ML workflow for thread {thread_id}, decision_set {decision_set_id}",
+            extra={"run_id": run_id, "thread_id": thread_id, "decision_set_id": decision_set_id, "job_id": job.id}
         )
 
         # Convert messages back to LangChain format
@@ -759,8 +817,16 @@ class IntegratedWorkerService:
                 lc_messages.append(AIMessage(content=content))
             # Add other message types as needed
 
-        state = {"messages": lc_messages}
-        config = {"configurable": {"thread_id": thread_id}}
+        state = {"messages": lc_messages, "decision_set_id": decision_set_id}
+
+        # Configure LangGraph with run_id for LangSmith tracing (Issue #16)
+        config = {
+            "configurable": {
+                "thread_id": thread_id,
+                # Add run_id for LangSmith trace correlation
+                "run_id": run_id,
+            }
+        }
 
         # Execute the graph with streaming
         # Use direct streaming service access (no HTTP bridge needed)
@@ -773,10 +839,11 @@ class IntegratedWorkerService:
             # Following LangGraph best practices: combine "updates" and "messages" modes
             stream_modes = ["updates", "messages"]
             logger.info(
-                f"Starting LangGraph multi-mode streaming for thread {thread_id}, modes: {stream_modes}, emitting events to decision_set {decision_set_id}"
+                f"Starting LangGraph multi-mode streaming for thread {thread_id}, modes: {stream_modes}, emitting events to decision_set {decision_set_id}",
+                extra={"run_id": run_id, "thread_id": thread_id, "decision_set_id": decision_set_id, "stream_modes": stream_modes}
             )
 
-            for stream_mode, chunk in self.graph.stream(
+            async for stream_mode, chunk in self.graph.astream(
                 state, config, stream_mode=stream_modes
             ):
                 # Process different stream modes for comprehensive agent insights
@@ -787,10 +854,14 @@ class IntegratedWorkerService:
                     stream_mode, chunk, decision_set_id, streaming_service
                 )
             logger.info(
-                f"LangGraph multi-mode streaming completed for thread {thread_id}"
+                f"LangGraph multi-mode streaming completed for thread {thread_id}",
+                extra={"run_id": run_id, "thread_id": thread_id, "decision_set_id": decision_set_id}
             )
         except Exception as stream_error:
-            logger.error(f"Streaming execution failed: {stream_error}")
+            logger.error(
+                f"Streaming execution failed: {stream_error}",
+                extra={"run_id": run_id, "thread_id": thread_id, "decision_set_id": decision_set_id, "error": str(stream_error)}
+            )
             await streaming_service.emit_error(
                 decision_set_id, f"Workflow execution failed: {str(stream_error)}"
             )
@@ -798,7 +869,10 @@ class IntegratedWorkerService:
 
         # Log the result for now
         # In the future, this would save results to decision_set, create artifacts, etc.
-        logger.info(f"Graph execution completed for job {job.id}")
+        logger.info(
+            f"Graph execution completed for job {job.id}",
+            extra={"run_id": run_id, "thread_id": thread_id, "decision_set_id": decision_set_id, "job_id": job.id}
+        )
 
         # For now, we'll simulate some processing time
         await asyncio.sleep(2)
@@ -864,24 +938,82 @@ class IntegratedWorkerService:
                             logger.info(
                                 f"Emitting dict-based reason card: {reason_card.get('agent', 'unknown')}"
                             )
-                            # Create reason card from dictionary data
-                            from libs.streaming_models import create_reason_card
-
-                            reason_card_obj = create_reason_card(
-                                agent=reason_card.get("agent", "unknown"),
-                                node=reason_card.get("node_name", "unknown"),
-                                decision_set_id=decision_set_id,
-                                reasoning=reason_card.get("outputs", {}).get(
-                                    "extraction_rationale", "No rationale provided"
-                                ),
-                                decision=f"Extracted constraints with {reason_card.get('confidence', 0)} confidence",
-                                category="constraint_extraction",
-                                confidence=reason_card.get("confidence", 0.5),
-                                inputs=reason_card.get("inputs", {}),
-                                outputs=reason_card.get("outputs", {}),
-                                alternatives_considered=[],
-                                priority="medium",
+                            # Normalize dictionaries produced by .model_dump()
+                            from pydantic import ValidationError
+                            from libs.streaming_models import (
+                                ReasonCard,
+                                create_reason_card,
                             )
+
+                            try:
+                                reason_card_obj = ReasonCard.model_validate(reason_card)
+                                normalized_node = (
+                                    reason_card_obj.node
+                                    or reason_card.get("node")
+                                    or reason_card.get("node_name")
+                                    or node_name
+                                )
+                                if reason_card_obj.decision_set_id in (
+                                    None,
+                                    "",
+                                    "unknown",
+                                ):
+                                    reason_card_obj = reason_card_obj.model_copy(
+                                        update={"decision_set_id": decision_set_id}
+                                    )
+                                if normalized_node and reason_card_obj.node != normalized_node:
+                                    reason_card_obj = reason_card_obj.model_copy(
+                                        update={"node": normalized_node}
+                                    )
+                            except ValidationError as validation_error:
+                                logger.debug(
+                                    "Reason card dict validation failed: %s",
+                                    validation_error,
+                                )
+                                normalized_node = (
+                                    reason_card.get("node")
+                                    or reason_card.get("node_name")
+                                    or node_name
+                                )
+                                reason_card_obj = create_reason_card(
+                                    agent=reason_card.get(
+                                        "agent", normalized_node or "unknown"
+                                    ),
+                                    node=normalized_node,
+                                    decision_set_id=reason_card.get(
+                                        "decision_set_id", decision_set_id
+                                    ),
+                                    reasoning=
+                                        reason_card.get("reasoning")
+                                        or reason_card.get("outputs", {}).get(
+                                            "extraction_rationale",
+                                            "No rationale provided",
+                                        ),
+                                    decision=
+                                        reason_card.get("decision")
+                                        or reason_card.get("message")
+                                        or f"Completed {normalized_node}",
+                                    category=reason_card.get(
+                                        "category", "constraint_extraction"
+                                    ),
+                                    confidence=reason_card.get("confidence"),
+                                    inputs=reason_card.get("inputs", {}),
+                                    outputs=reason_card.get("outputs", {}),
+                                    alternatives_considered=reason_card.get(
+                                        "alternatives_considered", []
+                                    ),
+                                    priority=reason_card.get("priority", "medium"),
+                                )
+
+                            if reason_card_obj.decision_set_id in (
+                                None,
+                                "",
+                                "unknown",
+                            ):
+                                reason_card_obj = reason_card_obj.model_copy(
+                                    update={"decision_set_id": decision_set_id}
+                                )
+
                             await streaming_service.emit_reason_card(reason_card_obj)
                         else:
                             logger.warning(

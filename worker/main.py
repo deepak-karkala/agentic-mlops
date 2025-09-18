@@ -408,20 +408,90 @@ class WorkerService:
                             logger.info(
                                 f"Emitting dict-based reason card: {reason_card.get('agent', 'unknown')}"
                             )
-                            # Emit dictionary-based reason card via HTTP API
+                            from pydantic import ValidationError
+                            from libs.streaming_models import ReasonCard
+
+                            try:
+                                reason_card_obj = ReasonCard.model_validate(reason_card)
+                                normalized_node = (
+                                    reason_card_obj.node
+                                    or reason_card.get("node")
+                                    or reason_card.get("node_name")
+                                    or node_name
+                                )
+                                if reason_card_obj.decision_set_id in (
+                                    None,
+                                    "",
+                                    "unknown",
+                                ):
+                                    reason_card_obj = reason_card_obj.model_copy(
+                                        update={"decision_set_id": decision_set_id}
+                                    )
+                                if normalized_node and reason_card_obj.node != normalized_node:
+                                    reason_card_obj = reason_card_obj.model_copy(
+                                        update={"node": normalized_node}
+                                    )
+                            except ValidationError as validation_error:
+                                logger.debug(
+                                    "Reason card dict validation failed: %s",
+                                    validation_error,
+                                )
+                                normalized_node = (
+                                    reason_card.get("node")
+                                    or reason_card.get("node_name")
+                                    or node_name
+                                )
+                                reason_card_obj = ReasonCard(
+                                    agent=reason_card.get(
+                                        "agent", normalized_node or "unknown"
+                                    ),
+                                    node=normalized_node,
+                                    decision_set_id=reason_card.get(
+                                        "decision_set_id", decision_set_id
+                                    ),
+                                    reasoning=
+                                        reason_card.get("reasoning")
+                                        or reason_card.get("outputs", {}).get(
+                                            "extraction_rationale",
+                                            "No rationale provided",
+                                        ),
+                                    decision=
+                                        reason_card.get("decision")
+                                        or reason_card.get("message")
+                                        or f"Completed {normalized_node}",
+                                    category=reason_card.get(
+                                        "category", "constraint_extraction"
+                                    ),
+                                    confidence=reason_card.get("confidence"),
+                                    inputs=reason_card.get("inputs", {}),
+                                    outputs=reason_card.get("outputs", {}),
+                                    alternatives_considered=reason_card.get(
+                                        "alternatives_considered", []
+                                    ),
+                                    priority=reason_card.get("priority", "medium"),
+                                )
+
+                            if reason_card_obj.decision_set_id in (
+                                None,
+                                "",
+                                "unknown",
+                            ):
+                                reason_card_obj = reason_card_obj.model_copy(
+                                    update={"decision_set_id": decision_set_id}
+                                )
+
                             await streaming_client.emit_reason_card(
-                                agent=reason_card.get("agent", "unknown"),
-                                node=reason_card.get("node_name", "unknown"),
-                                reasoning=reason_card.get("outputs", {}).get(
-                                    "extraction_rationale", "No rationale provided"
-                                ),
-                                decision=f"Extracted constraints with {reason_card.get('confidence', 0)} confidence",
-                                category="constraint_extraction",
-                                confidence=reason_card.get("confidence", 0.5),
-                                inputs=reason_card.get("inputs", {}),
-                                outputs=reason_card.get("outputs", {}),
-                                alternatives_considered=[],
-                                priority="medium",
+                                agent=reason_card_obj.agent,
+                                node=reason_card_obj.node,
+                                reasoning=reason_card_obj.reasoning,
+                                decision=reason_card_obj.decision,
+                                category=reason_card_obj.category,
+                                confidence=reason_card_obj.confidence or 0.5,
+                                inputs=reason_card_obj.inputs or {},
+                                outputs=reason_card_obj.outputs or {},
+                                alternatives_considered=
+                                    reason_card_obj.alternatives_considered or [],
+                                priority=reason_card_obj.priority,
                             )
                         else:
                             logger.warning(

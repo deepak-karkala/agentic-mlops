@@ -23,6 +23,13 @@ class StreamEventType(str, Enum):
     HEARTBEAT = "heartbeat"
     WORKFLOW_PAUSED = "workflow-paused"  # For HITL gates
 
+    # Enhanced HITL events
+    QUESTIONS_PRESENTED = "questions-presented"  # When questions are shown to user
+    AUTO_APPROVING = "auto-approving"  # Countdown for auto-approval
+    RESPONSES_COLLECTED = "responses-collected"  # User responses or auto-approval completed
+    WORKFLOW_RESUMED = "workflow-resumed"  # Workflow continuing after HITL
+    COUNTDOWN_TICK = "countdown-tick"  # Real-time countdown updates
+
 
 class ReasonCard(BaseModel):
     """

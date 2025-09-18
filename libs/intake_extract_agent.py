@@ -110,8 +110,7 @@ Be thorough but practical. Focus on information that will meaningfully impact ar
             name="Intake Extract Agent",
             description="Parse natural language input into structured MLOps constraints",
             system_prompt=self.SYSTEM_PROMPT,
-            model="gpt-4-turbo-preview",
-            temperature=0.3,  # Lower temperature for more consistent extraction
+            # model will be read from OPENAI_MODEL environment variable
         )
 
     async def get_structured_output_type(self) -> Type[ConstraintExtractionResult]:

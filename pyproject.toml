@@ -22,6 +22,9 @@ dependencies = [
     "boto3>=1.26.0", # AWS SDK for S3 operations
     "sse-starlette>=2.0.0", # Server-Sent Events for streaming
     "httpx>=0.28.1",
+    "aiosqlite>=0.21.0",
+    "langsmith>=0.4.25",
+    "python-json-logger>=3.3.0",
 ]
 
 [project.optional-dependencies]

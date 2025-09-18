@@ -136,8 +136,7 @@ Be thorough but decisive. Provide practical architecture recommendations that te
             name="LLM MLOps Planner",
             description="LLM-powered MLOps architecture pattern selection and planning",
             system_prompt=self.SYSTEM_PROMPT,
-            model="gpt-4-turbo-preview",
-            temperature=0.2,  # Lower temperature for consistent architectural reasoning
+            # model will be read from OPENAI_MODEL environment variable
         )
 
         # LLM-powered planner uses reasoning instead of hard-coded patterns

@@ -5,10 +5,12 @@ This module implements the core code generation functionality for MLOps projects
 using Claude Code SDK to generate complete infrastructure and application code.
 """
 
+import asyncio
 import logging
 import os
 import tempfile
 import zipfile
+from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Any, Optional
@@ -26,6 +28,7 @@ class CodegenService:
     def __init__(self):
         self.s3_client = None
         self.s3_bucket = os.getenv("S3_BUCKET_NAME")
+        self._claude_timeout = int(os.getenv("CLAUDE_CODE_TIMEOUT_SECONDS", "60"))
 
         if self.s3_bucket:
             try:
@@ -103,45 +106,150 @@ class CodegenService:
         generation_prompt = self._create_generation_prompt(plan)
 
         try:
-            # Initialize Claude Code SDK client
-            # Note: Adjusting options based on actual SDK API
-            options = ClaudeCodeOptions(
-                system_prompt=system_prompt,
-                allowed_tools=["Write", "Read", "Bash", "Edit"],
-            )
-
-            artifacts = []
-
-            async with ClaudeSDKClient(options=options) as client:
-                # Send the generation request
-                await client.query(generation_prompt)
-
-                # Process the streaming response
-                async for message in client.receive_response():
-                    if message.get("type") == "file_created":
-                        file_info = message.get("file_info", {})
-                        artifacts.append(
-                            {
-                                "path": file_info.get("path", "unknown"),
-                                "kind": self._classify_file_kind(
-                                    file_info.get("path", "")
-                                ),
-                                "size_bytes": file_info.get("size", 0),
-                                "created_at": datetime.now(timezone.utc).isoformat(),
-                            }
-                        )
-
-                # If no artifacts were tracked via messages, scan the directory
-                if not artifacts:
-                    artifacts = await self._scan_generated_files(output_dir)
-
-            logger.info(f"Generated {len(artifacts)} code artifacts")
+            # Use decomposed approach - generate components separately
+            artifacts = await self._generate_decomposed_components(plan, output_dir)
+            logger.info(f"Generated {len(artifacts)} code artifacts using decomposed approach")
             return artifacts
 
+        except asyncio.TimeoutError:
+            logger.warning("Claude Code SDK timed out; falling back to templates")
+            return await self._fallback_template_generation(plan, output_dir)
         except Exception:
             logger.exception("Claude Code SDK generation failed")
             # Fallback to template-based generation
             return await self._fallback_template_generation(plan, output_dir)
+
+    async def _generate_decomposed_components(self, plan: Dict[str, Any], output_dir: Path) -> List[Dict[str, Any]]:
+        """Generate MLOps components using multiple focused Claude Code SDK calls."""
+        artifacts = []
+
+        # Define components to generate
+        components = [
+            {
+                "name": "application",
+                "subdir": "src",
+                "system_prompt": "You are an expert Python developer specializing in FastAPI and ML services.",
+                "user_prompt": self._create_application_prompt(plan),
+                "timeout": 120
+            },
+            {
+                "name": "infrastructure",
+                "subdir": "terraform",
+                "system_prompt": "You are an expert DevOps engineer specializing in AWS and Terraform.",
+                "user_prompt": self._create_infrastructure_prompt(plan),
+                "timeout": 120
+            },
+            {
+                "name": "ci_cd",
+                "subdir": ".github/workflows",
+                "system_prompt": "You are an expert DevOps engineer specializing in GitHub Actions and CI/CD.",
+                "user_prompt": self._create_cicd_prompt(plan),
+                "timeout": 90
+            }
+        ]
+
+        for component in components:
+            try:
+                logger.info(f"Generating {component['name']} component")
+                component_artifacts = await self._generate_single_component(
+                    plan, output_dir, component
+                )
+                artifacts.extend(component_artifacts)
+                logger.info(f"Generated {len(component_artifacts)} files for {component['name']}")
+
+            except Exception as e:
+                logger.warning(f"Failed to generate {component['name']} component: {e}")
+                # Continue with other components
+
+        return artifacts
+
+    async def _generate_single_component(
+        self, plan: Dict[str, Any], output_dir: Path, component: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """Generate a single MLOps component using Claude Code SDK."""
+        target_dir = output_dir / component["subdir"]
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        # Track files before generation
+        files_before = set(target_dir.glob("**/*"))
+
+        options = ClaudeCodeOptions(
+            system_prompt=component["system_prompt"],
+            permission_mode='acceptEdits',
+            cwd=str(target_dir),
+            allowed_tools=["Write", "Read"],
+        )
+
+        async with ClaudeSDKClient(options=options) as client:
+            await client.query(component["user_prompt"])
+
+            # Consume all responses with timeout
+            async def consume_responses():
+                async for message in client.receive_response():
+                    logger.debug(f"Component {component['name']}: {type(message).__name__}")
+
+            await asyncio.wait_for(consume_responses(), timeout=component["timeout"])
+
+        # Find newly created files
+        files_after = set(target_dir.glob("**/*"))
+        new_files = [f for f in files_after - files_before if f.is_file()]
+
+        # Create artifacts for new files
+        artifacts = []
+        for file_path in new_files:
+            relative_path = file_path.relative_to(output_dir)
+            artifacts.append({
+                "path": str(relative_path),
+                "kind": self._classify_file_kind(str(relative_path)),
+                "size_bytes": file_path.stat().st_size,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+
+        return artifacts
+
+    def _create_application_prompt(self, plan: Dict[str, Any]) -> str:
+        """Create prompt for application code generation."""
+        services = plan.get("key_services", {})
+        api_service = services.get("api", "ML inference service")
+
+        return f"""Create a FastAPI application for {api_service}.
+
+Include:
+1. main.py - FastAPI app with health check and prediction endpoints
+2. requirements.txt - Python dependencies including FastAPI, uvicorn, pydantic
+3. Dockerfile - Multi-stage container build
+
+Keep it production-ready but focused. Include proper error handling and logging."""
+
+    def _create_infrastructure_prompt(self, plan: Dict[str, Any]) -> str:
+        """Create prompt for infrastructure code generation."""
+        architecture = plan.get("architecture_type", "app_runner")
+        budget = plan.get("estimated_monthly_cost", 100)
+
+        return f"""Create Terraform configuration for {architecture} architecture.
+
+Budget constraint: ${budget}/month
+
+Include:
+1. main.tf - Core AWS resources (App Runner service, RDS database if needed)
+2. variables.tf - Input variables
+3. outputs.tf - Output values
+
+Focus on cost-effective, secure AWS resources. Use App Runner for container deployment."""
+
+    def _create_cicd_prompt(self, plan: Dict[str, Any]) -> str:
+        """Create prompt for CI/CD pipeline generation."""
+        phases = plan.get("implementation_phases", ["build", "test", "deploy"])
+
+        return f"""Create GitHub Actions workflow for ML service deployment.
+
+Implementation phases: {', '.join(phases)}
+
+Include:
+1. ci.yml - Build, test, and deploy workflow
+2. deploy.yml - Production deployment workflow (optional)
+
+Focus on container building, testing, and AWS deployment patterns."""
 
     async def _fallback_template_generation(
         self, plan: Dict[str, Any], output_dir: Path
@@ -204,13 +312,39 @@ class CodegenService:
 
         return artifacts
 
+    def _normalize_sdk_message(self, message: Any) -> Dict[str, Any]:
+        """Convert Claude SDK streaming messages into a dict for easier handling."""
+        if isinstance(message, dict):
+            return message
+
+        if hasattr(message, "model_dump") and callable(message.model_dump):
+            try:
+                return message.model_dump()
+            except Exception:  # pragma: no cover - defensive fallback
+                pass
+
+        if is_dataclass(message):
+            try:
+                return asdict(message)
+            except Exception:  # pragma: no cover
+                pass
+
+        if hasattr(message, "__dict__"):
+            try:
+                return dict(message.__dict__)
+            except Exception:  # pragma: no cover
+                pass
+
+        # Final fallback: wrap raw payload so callers can log / inspect it
+        return {"type": None, "raw_message": message}
+
     def _create_system_prompt(self, plan: Dict[str, Any]) -> str:
         """Create system prompt for Claude Code SDK."""
         pattern_name = plan.get("pattern_name", "MLOps System")
         architecture_type = plan.get("architecture_type", "hybrid")
         key_services = plan.get("key_services", {})
 
-        return f"""You are an expert MLOps engineer tasked with generating a complete, production-ready repository for a {pattern_name}.
+        return f"""You are an expert MLOps engineer tasked with generating a production-ready {pattern_name}.
 
 Architecture Type: {architecture_type}
 Key Services: {", ".join(key_services.keys())}
@@ -220,14 +354,12 @@ Your task is to generate a complete MLOps repository with:
 2. Application code and services
 3. CI/CD pipelines (GitHub Actions)
 4. Configuration and documentation
-5. Monitoring and observability setup
 
 Requirements:
 - Use AWS best practices for security and scalability
 - Include proper error handling and logging
 - Follow infrastructure as code principles
 - Generate comprehensive documentation
-- Include validation and testing configurations
 
 Focus on creating production-quality code that follows MLOps best practices."""
 
@@ -252,7 +384,7 @@ Focus on creating production-quality code that follows MLOps best practices."""
 
 **Budget constraint:** ${cost_budget}/month
 
-Please create a complete repository structure including:
+Please create a repository structure including:
 
 1. **Infrastructure (terraform/)**
    - Main Terraform configuration for AWS
@@ -267,19 +399,16 @@ Please create a complete repository structure including:
 3. **CI/CD (.github/workflows/)**
    - Build and test workflows
    - Deployment pipelines
-   - Security scanning
 
 4. **Configuration**
    - Environment-specific configs
-   - Monitoring setup
    - Logging configuration
 
 5. **Documentation**
    - README with setup instructions
-   - Architecture diagrams
    - Deployment guide
 
-Generate all necessary files with proper content, following AWS and MLOps best practices. Make sure the code is production-ready and well-documented."""
+Generate all necessary files with proper content, following AWS and MLOps best practices."""
 
     def _classify_file_kind(self, file_path: str) -> str:
         """Classify the type of generated file."""

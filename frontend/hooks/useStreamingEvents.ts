@@ -18,7 +18,12 @@ export type StreamEventType =
   | "workflow-complete"
   | "error"
   | "heartbeat"
-  | "workflow-paused";
+  | "workflow-paused"
+  | "questions-presented"
+  | "auto-approving"
+  | "responses-collected"
+  | "workflow-resumed"
+  | "countdown-tick";
 
 export interface ReasonCard {
   agent: string;
@@ -54,6 +59,26 @@ export interface WorkflowProgress {
   estimated_time_remaining_ms?: number;
 }
 
+export interface HITLQuestion {
+  question_id: string;
+  question_text: string;
+  question_type: "choice" | "text" | "boolean" | "numeric";
+  field_targets: string[];
+  priority: "high" | "medium" | "low";
+  choices?: string[];
+}
+
+export interface HITLState {
+  isActive: boolean;
+  questions: HITLQuestion[];
+  smartDefaults: Record<string, string>;
+  timeoutSeconds: number;
+  node: string | null;
+  responses?: Record<string, string>;
+  isAutoApproving: boolean;
+  countdownTime?: number;
+}
+
 export interface StreamingState {
   isConnected: boolean;
   isConnecting: boolean;
@@ -63,6 +88,7 @@ export interface StreamingState {
   currentNode: string | null;
   error: string | null;
   connectionError: boolean;
+  hitlState: HITLState;
 }
 
 export interface UseStreamingEventsOptions {
@@ -89,6 +115,14 @@ export function useStreamingEvents(options: UseStreamingEventsOptions = {}) {
     currentNode: null,
     error: null,
     connectionError: false,
+    hitlState: {
+      isActive: false,
+      questions: [],
+      smartDefaults: {},
+      timeoutSeconds: 0,
+      node: null,
+      isAutoApproving: false,
+    },
   });
 
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -126,7 +160,12 @@ export function useStreamingEvents(options: UseStreamingEventsOptions = {}) {
       // Process specific event types
       switch (event.type) {
         case "reason-card":
+          // Backend sends nested structure: event.data contains the actual ReasonCard
           const reasonCard = event.data as ReasonCard;
+          if (!reasonCard) {
+            console.warn("Received reason-card event but event.data is undefined");
+            break;
+          }
           newState.reasonCards = [...prevState.reasonCards, reasonCard];
           console.log("Added reason card:", {
             agent: reasonCard.agent,
@@ -136,12 +175,13 @@ export function useStreamingEvents(options: UseStreamingEventsOptions = {}) {
           break;
 
         case "node-start":
-          newState.currentNode = event.data.node as string;
+          // Backend sends nested structure: event.data contains the actual node data
+          newState.currentNode = event.data?.node as string;
 
           // Create or update workflow progress
           if (!newState.workflowProgress) {
             newState.workflowProgress = {
-              current_node: event.data.node as string,
+              current_node: event.data?.node as string,
               nodes_completed: [],
               nodes_remaining: [],
               progress_percentage: 10,
@@ -150,15 +190,16 @@ export function useStreamingEvents(options: UseStreamingEventsOptions = {}) {
           } else {
             newState.workflowProgress = {
               ...newState.workflowProgress,
-              current_node: event.data.node as string,
+              current_node: event.data?.node as string,
               status: "running",
             };
           }
-          console.log("Node started:", event.data.node);
+          console.log("Node started:", event.data?.node);
           break;
 
         case "node-complete":
-          const completedNode = event.data.node as string;
+          // Backend sends nested structure: event.data contains the actual node data
+          const completedNode = event.data?.node as string;
 
           if (newState.workflowProgress) {
             const nodesCompleted = [
@@ -226,7 +267,8 @@ export function useStreamingEvents(options: UseStreamingEventsOptions = {}) {
           break;
 
         case "error":
-          newState.error = event.data.error as string;
+          // Backend sends nested structure: event.data contains the actual error data
+          newState.error = event.data?.error as string;
           if (newState.workflowProgress) {
             newState.workflowProgress = {
               ...newState.workflowProgress,
@@ -237,6 +279,84 @@ export function useStreamingEvents(options: UseStreamingEventsOptions = {}) {
 
         case "heartbeat":
           // Heartbeat events just keep the connection alive
+          break;
+
+        case "questions-presented":
+          // HITL gate has presented questions to user
+          console.log("Questions presented:", event.data);
+          if (newState.workflowProgress) {
+            newState.workflowProgress = {
+              ...newState.workflowProgress,
+              status: "hitl-questions",
+            };
+          }
+          // Update HITL state with questions
+          newState.hitlState = {
+            isActive: true,
+            questions: event.data.questions || [],
+            smartDefaults: event.data.smart_defaults || {},
+            timeoutSeconds: event.data.timeout_seconds || 0,
+            node: event.data.node || null,
+            isAutoApproving: false,
+            countdownTime: event.data.timeout_seconds || 0,
+          };
+          break;
+
+        case "auto-approving":
+          // Auto-approval countdown is happening
+          console.log("Auto-approval countdown:", event.data);
+          if (newState.workflowProgress) {
+            newState.workflowProgress = {
+              ...newState.workflowProgress,
+              status: "auto-approving",
+            };
+          }
+          newState.hitlState = {
+            ...newState.hitlState,
+            isAutoApproving: true,
+          };
+          break;
+
+        case "responses-collected":
+          // User responses or auto-approval completed
+          console.log("Responses collected:", event.data);
+          if (newState.workflowProgress) {
+            newState.workflowProgress = {
+              ...newState.workflowProgress,
+              status: "responses-collected",
+            };
+          }
+          newState.hitlState = {
+            ...newState.hitlState,
+            isActive: false,
+            responses: event.data.responses || {},
+          };
+          break;
+
+        case "workflow-resumed":
+          // Workflow is continuing after HITL
+          console.log("Workflow resumed after HITL");
+          if (newState.workflowProgress) {
+            newState.workflowProgress = {
+              ...newState.workflowProgress,
+              status: "running",
+            };
+          }
+          newState.hitlState = {
+            ...newState.hitlState,
+            isActive: false,
+          };
+          break;
+
+        case "countdown-tick":
+          // Real-time countdown update
+          console.log("Countdown tick:", event.data);
+          if (newState.hitlState.isActive) {
+            newState.hitlState = {
+              ...newState.hitlState,
+              countdownTime: event.data.remaining_seconds || 0,
+            };
+          }
           break;
       }
 
@@ -326,6 +446,11 @@ export function useStreamingEvents(options: UseStreamingEventsOptions = {}) {
         "workflow-paused",
         "error",
         "heartbeat",
+        "questions-presented",
+        "auto-approving",
+        "responses-collected",
+        "workflow-resumed",
+        "countdown-tick",
       ];
 
       eventTypes.forEach((eventType) => {
@@ -388,6 +513,14 @@ export function useStreamingEvents(options: UseStreamingEventsOptions = {}) {
       workflowProgress: null,
       currentNode: null,
       error: null,
+      hitlState: {
+        isActive: false,
+        questions: [],
+        smartDefaults: {},
+        timeoutSeconds: 0,
+        node: null,
+        isAutoApproving: false,
+      },
     }));
   }, []);
 

@@ -125,6 +125,97 @@ class StreamingService:
         )
         await self.emit_event(event)
 
+    async def emit_questions_presented(
+        self,
+        decision_set_id: str,
+        questions: List[Dict],
+        smart_defaults: Dict[str, str],
+        timeout_seconds: int,
+        node_name: Optional[str] = None,
+    ) -> None:
+        """Emit a questions presented event for HITL interaction."""
+        event = StreamEvent(
+            event_type=StreamEventType.QUESTIONS_PRESENTED,
+            decision_set_id=decision_set_id,
+            data={
+                "node": node_name,
+                "questions": questions,
+                "smart_defaults": smart_defaults,
+                "timeout_seconds": timeout_seconds,
+                "questions_count": len(questions),
+            },
+            message=f"Presented {len(questions)} questions with {timeout_seconds}s timeout",
+        )
+        await self.emit_event(event)
+
+    async def emit_auto_approving(
+        self,
+        decision_set_id: str,
+        remaining_seconds: int,
+        smart_defaults: Dict[str, str],
+        node_name: Optional[str] = None,
+    ) -> None:
+        """Emit an auto-approval countdown event."""
+        event = StreamEvent(
+            event_type=StreamEventType.AUTO_APPROVING,
+            decision_set_id=decision_set_id,
+            data={
+                "node": node_name,
+                "remaining_seconds": remaining_seconds,
+                "smart_defaults": smart_defaults,
+            },
+            message=f"Auto-approving in {remaining_seconds} seconds",
+        )
+        await self.emit_event(event)
+
+    async def emit_countdown_tick(
+        self,
+        decision_set_id: str,
+        remaining_seconds: int,
+        node_name: Optional[str] = None,
+    ) -> None:
+        """Emit a countdown tick for real-time timer updates."""
+        event = StreamEvent(
+            event_type=StreamEventType.COUNTDOWN_TICK,
+            decision_set_id=decision_set_id,
+            data={"node": node_name, "remaining_seconds": remaining_seconds},
+            message=f"{remaining_seconds}s remaining",
+        )
+        await self.emit_event(event)
+
+    async def emit_responses_collected(
+        self,
+        decision_set_id: str,
+        responses: List[Dict],
+        approval_method: str,
+        node_name: Optional[str] = None,
+    ) -> None:
+        """Emit a responses collected event."""
+        event = StreamEvent(
+            event_type=StreamEventType.RESPONSES_COLLECTED,
+            decision_set_id=decision_set_id,
+            data={
+                "node": node_name,
+                "responses": responses,
+                "approval_method": approval_method,
+                "responses_count": len(responses),
+            },
+            message=f"Collected {len(responses)} responses via {approval_method}",
+        )
+        await self.emit_event(event)
+
+    async def emit_workflow_resumed(
+        self, decision_set_id: str, next_node: str, node_name: Optional[str] = None
+    ) -> None:
+        """Emit a workflow resumed event after HITL interaction."""
+        event = StreamEvent(
+            event_type=StreamEventType.WORKFLOW_RESUMED,
+            decision_set_id=decision_set_id,
+            data={"node": node_name, "next_node": next_node},
+            message=f"Workflow resumed, continuing to {next_node}",
+        )
+        await self.emit_event(event)
+
     async def subscribe(
         self, decision_set_id: str
     ) -> AsyncGenerator[StreamEvent, None]:
