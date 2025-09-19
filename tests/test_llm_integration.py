@@ -38,7 +38,7 @@ class TestOpenAIClient:
         """Create test client."""
         return OpenAIClient(
             api_key="test-key",
-            default_model="gpt-4-turbo-preview",
+            default_model="gpt-5-nano",
             max_retries=2,
             timeout=30.0,
         )
@@ -46,7 +46,7 @@ class TestOpenAIClient:
     def test_client_initialization(self, client):
         """Test client initialization."""
         assert client.api_key == "test-key"
-        assert client.default_model == "gpt-4-turbo-preview"
+        assert client.default_model == "gpt-5-nano"
         assert client.max_retries == 2
         assert client.timeout == 30.0
 
@@ -341,7 +341,7 @@ class TestLLMClientIntegration:
 
             # Should return same instance
             assert client1 is client2
-            assert client1.default_model == "gpt-4-turbo-preview"
+            assert client1.default_model == "gpt-5-nano"
 
     def test_get_llm_client_with_custom_model(self):
         """Test LLM client creation with custom model."""

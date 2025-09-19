@@ -197,8 +197,7 @@ class BaseLLMAgent(BaseMLOpsAgent):
         name: str,
         description: str,
         system_prompt: str,
-        model: str = "gpt-4-turbo-preview",
-        temperature: float = 0.3,
+        model: str = "gpt-5-nano",
         max_tokens: Optional[int] = None,
     ):
         """
@@ -210,14 +209,12 @@ class BaseLLMAgent(BaseMLOpsAgent):
             description: Agent description
             system_prompt: System prompt for the LLM
             model: OpenAI model to use
-            temperature: Sampling temperature
             max_tokens: Maximum tokens in response
         """
         super().__init__(agent_type, name, description)
 
         self._system_prompt = system_prompt
         self.model = model
-        self.temperature = temperature
         self.max_tokens = max_tokens
 
         # LLM client (lazy initialization)
@@ -293,13 +290,16 @@ class BaseLLMAgent(BaseMLOpsAgent):
             output_type = await self.get_structured_output_type()
 
             # Make LLM call with structured output
-            llm_response = await self.llm_client.complete(
-                messages=messages,
-                response_format=output_type,
-                model=self.model,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-            )
+            # Build parameters, excluding None values
+            llm_params = {
+                "messages": messages,
+                "response_format": output_type,
+                "model": self.model,
+            }
+            if self.max_tokens is not None:
+                llm_params["max_tokens"] = self.max_tokens
+
+            llm_response = await self.llm_client.complete(**llm_params)
 
             # Process LLM response into agent output
             out = await self.process_llm_response(llm_response, context, trigger, state)

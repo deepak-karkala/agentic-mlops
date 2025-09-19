@@ -30,6 +30,14 @@ except ImportError:
     SQLITE_CHECKPOINTER_AVAILABLE = False
 
 try:
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+    ASYNC_SQLITE_CHECKPOINTER_AVAILABLE = True
+except ImportError:
+    AsyncSqliteSaver = None
+    ASYNC_SQLITE_CHECKPOINTER_AVAILABLE = False
+
+try:
     from langgraph.checkpoint.memory import MemorySaver
 
     MEMORY_CHECKPOINTER_AVAILABLE = True
@@ -178,6 +186,58 @@ def create_postgres_checkpointer():
     checkpointer = PostgresSaver.from_conn_string(database_url)
     checkpointer.setup()
     return checkpointer
+
+
+async def create_async_checkpointer():
+    """
+    Create an async checkpointer for use with async LangGraph operations.
+
+    Returns:
+        Async checkpointer instance suitable for async operations
+    """
+    database_url = get_database_url()
+    logger = logging.getLogger(__name__)
+
+    # Development: Use AsyncSqliteSaver for async operations
+    if database_url.startswith("sqlite://") and ASYNC_SQLITE_CHECKPOINTER_AVAILABLE:
+        try:
+            # Convert SQLite URL to file path for AsyncSqliteSaver
+            if database_url == "sqlite:///:memory:":
+                # In-memory SQLite - use memory checkpointer instead
+                if MEMORY_CHECKPOINTER_AVAILABLE:
+                    checkpointer = MemorySaver()
+                    logger.info("Using MemorySaver for in-memory async operations")
+                    return checkpointer
+            else:
+                # File-based SQLite
+                sqlite_path = database_url.replace("sqlite:///", "").replace(
+                    "sqlite://", ""
+                )
+                if sqlite_path.startswith("./"):
+                    sqlite_path = sqlite_path[2:]  # Remove "./" prefix
+
+                # Create async checkpointer database file
+                checkpoint_path = f"{sqlite_path}.async_checkpoints"
+                checkpointer = AsyncSqliteSaver.from_conn_string(f"aiosqlite:///{checkpoint_path}")
+                await checkpointer.setup()
+                logger.info(
+                    "Using AsyncSqliteSaver for async development persistence",
+                    extra={"path": checkpoint_path},
+                )
+                return checkpointer
+        except Exception as e:
+            logger.warning("AsyncSqliteSaver initialization failed", extra={"error": str(e)})
+            # Fall through to memory checkpointer
+
+    # Fallback: Use in-memory checkpointer
+    if MEMORY_CHECKPOINTER_AVAILABLE:
+        checkpointer = MemorySaver()
+        logger.info("Using MemorySaver as async fallback (no persistence)")
+        return checkpointer
+
+    # No async checkpointer available
+    logger.error("No async checkpointer available - running without persistence")
+    return None
 
 
 def create_postgres_checkpointer_safe():

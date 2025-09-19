@@ -71,39 +71,8 @@ resource "aws_apprunner_service" "api" {
   }
 }
 
-resource "aws_apprunner_service" "worker" {
-  count = var.worker_image != "" ? 1 : 0
-
-  service_name = "${var.project}-worker"
-
-  source_configuration {
-    image_repository {
-      image_identifier      = var.worker_image
-      image_repository_type = "ECR"
-      image_configuration {
-        port = "8080"
-        runtime_environment_variables = {
-          DATABASE_URL   = "postgresql://postgres:${var.db_password}@${aws_db_proxy.postgres.endpoint}:5432/postgres"
-          S3_BUCKET_NAME = aws_s3_bucket.artifacts.bucket
-          AWS_REGION     = var.region
-        }
-      }
-    }
-    auto_deployments_enabled = false
-  }
-
-  instance_configuration {
-    cpu    = "1024"
-    memory = "2048"
-  }
-
-  network_configuration {
-    egress_configuration {
-      egress_type       = "VPC"
-      vpc_connector_arn = aws_apprunner_vpc_connector.main.arn
-    }
-  }
-}
+# Worker service removed - now integrated into API server
+# The API service runs both the FastAPI server and background worker tasks
 
 resource "aws_apprunner_service" "frontend" {
   count = var.frontend_image != "" ? 1 : 0

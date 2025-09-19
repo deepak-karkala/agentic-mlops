@@ -117,8 +117,7 @@ Focus on practical completeness rather than theoretical perfection. The goal is 
             name="Coverage Check Agent",
             description="Analyze constraint coverage and identify critical gaps",
             system_prompt=self.SYSTEM_PROMPT,
-            model="gpt-4-turbo-preview",
-            temperature=0.2,  # Lower temperature for consistent analysis
+            # model will be read from OPENAI_MODEL environment variable
         )
 
     async def get_structured_output_type(self) -> Type[CoverageAnalysisResult]:

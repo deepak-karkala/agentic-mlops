@@ -7,16 +7,99 @@ for distributed, fault-tolerant processing.
 """
 
 import asyncio
+import os
 import signal
 import sys
 import uuid
 import logging
+import httpx
 from contextlib import contextmanager
+from dotenv import load_dotenv
 
 from libs.job_service import JobService
 from libs.database import create_database_engine, create_session_maker
 from libs.models import Job
-from libs.graph import build_thin_graph
+from libs.graph import build_thin_graph, build_full_graph, build_streaming_test_graph
+from libs.streaming_service import get_streaming_service
+
+# Load environment variables from .env file
+load_dotenv()
+
+
+class WorkerStreamingClient:
+    """HTTP client for worker to emit streaming events to API server."""
+
+    def __init__(
+        self, decision_set_id: str, api_base_url: str = "http://localhost:8000"
+    ):
+        self.decision_set_id = decision_set_id
+        self.api_base_url = api_base_url
+
+    async def _emit_event(self, event_data: dict):
+        """Send event to API server."""
+        url = f"{self.api_base_url}/api/streams/{self.decision_set_id}/emit"
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, json=event_data, timeout=5.0)
+                if response.status_code != 200:
+                    logging.error(
+                        f"Failed to emit event: {response.status_code} {response.text}"
+                    )
+        except Exception as e:
+            logging.error(f"Error emitting streaming event: {e}")
+
+    async def emit_reason_card(
+        self,
+        agent: str,
+        node: str,
+        reasoning: str,
+        decision: str,
+        category: str = "unknown",
+        confidence: float = 0.5,
+        inputs: dict = None,
+        outputs: dict = None,
+        alternatives_considered: list = None,
+        priority: str = "medium",
+    ):
+        """Emit a reason card event."""
+        await self._emit_event(
+            {
+                "event_type": "reason_card",
+                "agent": agent,
+                "node": node,
+                "reasoning": reasoning,
+                "decision": decision,
+                "category": category,
+                "confidence": confidence,
+                "inputs": inputs or {},
+                "outputs": outputs or {},
+                "alternatives_considered": alternatives_considered or [],
+                "priority": priority,
+            }
+        )
+
+    async def emit_node_start(self, node_name: str, message: str = ""):
+        """Emit a node start event."""
+        await self._emit_event(
+            {"event_type": "node_start", "node_name": node_name, "message": message}
+        )
+
+    async def emit_node_complete(
+        self, node_name: str, message: str = "", outputs: dict = None
+    ):
+        """Emit a node completion event."""
+        await self._emit_event(
+            {
+                "event_type": "node_complete",
+                "node_name": node_name,
+                "message": message,
+                "outputs": outputs or {},
+            }
+        )
+
+    async def emit_error(self, message: str):
+        """Emit an error event."""
+        await self._emit_event({"event_type": "error", "message": message})
 
 
 # Configure logging
@@ -44,7 +127,17 @@ class WorkerService:
         self.poll_interval = poll_interval  # seconds between job polls
         self.lease_duration = lease_duration  # minutes to hold job lease
         self.running = False
-        self.graph = build_thin_graph()
+        # Choose graph type based on environment variable
+        graph_type = os.getenv("GRAPH_TYPE", "thin").lower()
+        if graph_type == "full":
+            logger.info("Using full graph with agent reasoning and streaming")
+            self.graph = build_full_graph()
+        elif graph_type == "streaming_test":
+            logger.info("Using streaming test graph with only intake_extract agent")
+            self.graph = build_streaming_test_graph()
+        else:
+            logger.info("Using thin graph for fast development")
+            self.graph = build_thin_graph()
 
         # Database setup
         self.engine = create_database_engine()
@@ -197,10 +290,15 @@ class WorkerService:
         thread_id = payload.get("thread_id")
         messages = payload.get("messages", [])
 
+        # Use decision_set_id for streaming events (this is what frontend SSE uses)
+        decision_set_id = job.decision_set_id
+
         if not thread_id:
             raise ValueError("Job payload missing required thread_id")
 
-        logger.info(f"Processing ML workflow for thread {thread_id}")
+        logger.info(
+            f"Processing ML workflow for thread {thread_id}, decision_set {decision_set_id}"
+        )
 
         # Convert messages back to LangChain format
         from langchain_core.messages import HumanMessage, AIMessage
@@ -219,11 +317,30 @@ class WorkerService:
         state = {"messages": lc_messages}
         config = {"configurable": {"thread_id": thread_id}}
 
-        # Execute the graph
-        # In a real system, this might involve multiple steps, streaming, etc.
-        await asyncio.get_event_loop().run_in_executor(
-            None, self.graph.invoke, state, config
-        )
+        # Execute the graph with streaming
+        # Use HTTP-based streaming client to emit events to API server
+        streaming_client = WorkerStreamingClient(decision_set_id)
+
+        try:
+            # Use .stream() with "updates" mode to get real-time agent reasoning
+            logger.info(
+                f"Starting LangGraph streaming for thread {thread_id}, emitting events to decision_set {decision_set_id}"
+            )
+            for chunk in self.graph.stream(state, config, stream_mode="updates"):
+                # Process streaming updates and emit to SSE clients
+                logger.info(
+                    f"Received stream chunk: {type(chunk)} keys: {list(chunk.keys()) if isinstance(chunk, dict) else 'not-dict'}"
+                )
+                await self._process_stream_chunk(
+                    chunk, decision_set_id, streaming_client
+                )
+            logger.info(f"LangGraph streaming completed for thread {thread_id}")
+        except Exception as stream_error:
+            logger.error(f"Streaming execution failed: {stream_error}")
+            await streaming_client.emit_error(
+                f"Workflow execution failed: {str(stream_error)}"
+            )
+            raise
 
         # Log the result for now
         # In the future, this would save results to decision_set, create artifacts, etc.
@@ -231,6 +348,164 @@ class WorkerService:
 
         # For now, we'll simulate some processing time
         await asyncio.sleep(2)
+
+    async def _process_stream_chunk(
+        self, chunk, decision_set_id: str, streaming_client
+    ):
+        """
+        Process a single stream chunk from LangGraph and emit appropriate SSE events.
+
+        Args:
+            chunk: Stream chunk from LangGraph (contains node updates)
+            decision_set_id: Decision set ID for routing SSE events
+            streaming_client: HTTP streaming client for emitting events to API server
+        """
+        try:
+            logger.debug(f"Processing stream chunk: {chunk}")
+
+            # chunk format: {node_name: node_state_update}
+            for node_name, node_update in chunk.items():
+                logger.info(f"Node update: {node_name} -> {node_update}")
+
+                # Emit node start event
+                await streaming_client.emit_node_start(
+                    node_name, f"Starting {node_name}"
+                )
+
+                # Look for reason cards in the node state
+                if hasattr(node_update, "reason_cards") and node_update.reason_cards:
+                    streaming_service = get_streaming_service()
+                    for reason_card in node_update.reason_cards:
+                        await streaming_service.emit_reason_card(reason_card)
+
+                # Look for reason cards in nested state structures
+                elif isinstance(node_update, dict):
+                    reason_cards = node_update.get("reason_cards", [])
+                    logger.info(
+                        f"Found {len(reason_cards)} reason cards in dict structure"
+                    )
+                    for i, reason_card in enumerate(reason_cards):
+                        logger.info(
+                            f"Processing reason card {i + 1}: type={type(reason_card)}, has_model_dump={hasattr(reason_card, 'model_dump')}"
+                        )
+                        if hasattr(reason_card, "model_dump"):  # Pydantic model
+                            # Emit reason card via HTTP API
+                            await streaming_client.emit_reason_card(
+                                agent=reason_card.agent,
+                                node=reason_card.node,
+                                reasoning=reason_card.reasoning,
+                                decision=reason_card.decision,
+                                category=reason_card.category,
+                                confidence=reason_card.confidence,
+                                inputs=reason_card.inputs,
+                                outputs=reason_card.outputs,
+                                alternatives_considered=reason_card.alternatives_considered,
+                                priority=reason_card.priority,
+                            )
+                        elif isinstance(
+                            reason_card, dict
+                        ):  # Dictionary-based reason card
+                            logger.info(
+                                f"Emitting dict-based reason card: {reason_card.get('agent', 'unknown')}"
+                            )
+                            from pydantic import ValidationError
+                            from libs.streaming_models import ReasonCard
+
+                            try:
+                                reason_card_obj = ReasonCard.model_validate(reason_card)
+                                normalized_node = (
+                                    reason_card_obj.node
+                                    or reason_card.get("node")
+                                    or reason_card.get("node_name")
+                                    or node_name
+                                )
+                                if reason_card_obj.decision_set_id in (
+                                    None,
+                                    "",
+                                    "unknown",
+                                ):
+                                    reason_card_obj = reason_card_obj.model_copy(
+                                        update={"decision_set_id": decision_set_id}
+                                    )
+                                if normalized_node and reason_card_obj.node != normalized_node:
+                                    reason_card_obj = reason_card_obj.model_copy(
+                                        update={"node": normalized_node}
+                                    )
+                            except ValidationError as validation_error:
+                                logger.debug(
+                                    "Reason card dict validation failed: %s",
+                                    validation_error,
+                                )
+                                normalized_node = (
+                                    reason_card.get("node")
+                                    or reason_card.get("node_name")
+                                    or node_name
+                                )
+                                reason_card_obj = ReasonCard(
+                                    agent=reason_card.get(
+                                        "agent", normalized_node or "unknown"
+                                    ),
+                                    node=normalized_node,
+                                    decision_set_id=reason_card.get(
+                                        "decision_set_id", decision_set_id
+                                    ),
+                                    reasoning=
+                                        reason_card.get("reasoning")
+                                        or reason_card.get("outputs", {}).get(
+                                            "extraction_rationale",
+                                            "No rationale provided",
+                                        ),
+                                    decision=
+                                        reason_card.get("decision")
+                                        or reason_card.get("message")
+                                        or f"Completed {normalized_node}",
+                                    category=reason_card.get(
+                                        "category", "constraint_extraction"
+                                    ),
+                                    confidence=reason_card.get("confidence"),
+                                    inputs=reason_card.get("inputs", {}),
+                                    outputs=reason_card.get("outputs", {}),
+                                    alternatives_considered=reason_card.get(
+                                        "alternatives_considered", []
+                                    ),
+                                    priority=reason_card.get("priority", "medium"),
+                                )
+
+                            if reason_card_obj.decision_set_id in (
+                                None,
+                                "",
+                                "unknown",
+                            ):
+                                reason_card_obj = reason_card_obj.model_copy(
+                                    update={"decision_set_id": decision_set_id}
+                                )
+
+                            await streaming_client.emit_reason_card(
+                                agent=reason_card_obj.agent,
+                                node=reason_card_obj.node,
+                                reasoning=reason_card_obj.reasoning,
+                                decision=reason_card_obj.decision,
+                                category=reason_card_obj.category,
+                                confidence=reason_card_obj.confidence or 0.5,
+                                inputs=reason_card_obj.inputs or {},
+                                outputs=reason_card_obj.outputs or {},
+                                alternatives_considered=
+                                    reason_card_obj.alternatives_considered or [],
+                                priority=reason_card_obj.priority,
+                            )
+                        else:
+                            logger.warning(
+                                f"Unknown reason card type: {type(reason_card)}, skipping"
+                            )
+
+                # Emit node completion
+                await streaming_client.emit_node_complete(
+                    node_name, f"Completed {node_name}"
+                )
+
+        except Exception as e:
+            logger.error(f"Error processing stream chunk: {e}")
+            await streaming_client.emit_error(f"Stream processing error: {str(e)}")
 
 
 async def main():

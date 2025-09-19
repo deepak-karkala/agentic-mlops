@@ -376,6 +376,7 @@ class TestConcurrency:
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="Worker is no longer used as separate service")
 class TestWorkerService:
     """Test worker service functionality."""
 

@@ -1,6 +1,6 @@
 # Complete AWS Deployment Guide for Agentic MLOps Platform
 
-This guide covers the complete end-to-end deployment process for the 3-service architecture: Frontend (Next.js), API (FastAPI), and Worker (LangGraph).
+This guide covers the complete end-to-end deployment process for the 2-service architecture: Frontend (Next.js) and API (FastAPI with integrated worker).
 
 ## Prerequisites
 
@@ -40,7 +40,7 @@ Enter your AWS Access Key ID, Secret Access Key, region (`us-east-1`), and outpu
 - Creates S3 bucket for Terraform state management
 - Gets default VPC and subnet information
 - Deploys core infrastructure:
-  - ECR repositories (API, Worker, Frontend)
+  - ECR repositories (API, Frontend)
   - RDS Postgres database with RDS Proxy
   - S3 bucket for artifacts storage
   - Security groups and IAM roles
@@ -55,10 +55,9 @@ Enter your AWS Access Key ID, Secret Access Key, region (`us-east-1`), and outpu
 ```
 
 **What this does:**
-- Builds Docker images for all 3 services:
-  - `api/Dockerfile` - FastAPI backend with uv package manager
+- Builds Docker images for both services:
+  - `api/Dockerfile` - FastAPI backend with integrated worker and uv package manager
   - `frontend/Dockerfile` - Next.js with standalone output (multi-stage build)
-  - `worker/Dockerfile` - LangGraph worker service
 - Pushes all images to their respective ECR repositories
 - Saves image URIs to `deployment-config.env` for next phase
 
@@ -69,10 +68,9 @@ Enter your AWS Access Key ID, Secret Access Key, region (`us-east-1`), and outpu
 ```
 
 **What this does:**
-- Deploys all 3 App Runner services simultaneously:
-  - **API Service**: FastAPI backend with database connectivity
+- Deploys both App Runner services simultaneously:
+  - **API Service**: FastAPI backend with integrated worker, database connectivity, and background job processing
   - **Frontend Service**: Next.js app configured to call the API
-  - **Worker Service**: Background job processor
 - Configures environment variables and service communication
 - Sets up auto-scaling and health checks
 
@@ -91,7 +89,7 @@ The services are deployed in a specific order to handle dependencies:
    - Just builds and stores images
 
 3. **Services Together** (`3-deploy-app-runner.sh`)
-   - API and Frontend deployed simultaneously
+   - API (with integrated worker) and Frontend deployed simultaneously
    - Frontend gets API URL via environment variable
    - **No circular dependency** because:
      - API doesn't need to know Frontend URL at startup
@@ -102,22 +100,25 @@ The services are deployed in a specific order to handle dependencies:
 
 ```
 Frontend (Next.js)
-    ↓ HTTP Requests
-API (FastAPI) 
-    ↓ Database Queries
-RDS Postgres
-    ↑ Background Jobs
-Worker (LangGraph)
+    ↓ HTTP Requests + SSE Streaming
+API (FastAPI + Integrated Worker)
+    ↓ Database Queries + Job Processing
+RDS Postgres (with background asyncio tasks)
 ```
+
+**Key Architecture Changes:**
+- **Integrated Worker**: LangGraph worker runs as background asyncio task within the API server
+- **Direct Streaming**: SSE events flow directly from worker to API to frontend (no HTTP bridge)
+- **Simplified Deployment**: Single server process reduces complexity while maintaining job persistence
 
 ## What Gets Created
 
 ### AWS Resources
 
-- **ECR Repositories**: 3 repositories for container images
+- **ECR Repositories**: 2 repositories for container images (API, Frontend)
 - **RDS Postgres**: Database with RDS Proxy for connection pooling
 - **S3 Bucket**: Storage for generated artifacts and Terraform state
-- **App Runner Services**: 3 managed container services
+- **App Runner Services**: 2 managed container services (API with integrated worker, Frontend)
 - **VPC Connector**: Enables App Runner to access RDS in VPC
 - **Security Groups**: Network security between services
 - **IAM Roles**: Proper permissions for all services
@@ -126,24 +127,18 @@ Worker (LangGraph)
 
 Each service gets appropriate environment variables:
 
-**API Service:**
+**API Service (with Integrated Worker):**
 ```bash
 DATABASE_URL=postgresql://postgres:password@proxy.region.rds.amazonaws.com:5432/postgres
 S3_BUCKET_NAME=project-artifacts-bucket
 AWS_REGION=us-east-1
 ENVIRONMENT=production  # Enables restricted CORS
+GRAPH_TYPE=full         # Enables full LangGraph with agent reasoning
 ```
 
 **Frontend Service:**
 ```bash
 NEXT_PUBLIC_API_BASE_URL=https://api-service-url.amazonaws.com
-```
-
-**Worker Service:**
-```bash
-DATABASE_URL=postgresql://postgres:password@proxy.region.rds.amazonaws.com:5432/postgres
-S3_BUCKET_NAME=project-artifacts-bucket
-AWS_REGION=us-east-1
 ```
 
 ## Post-Deployment Verification
@@ -160,6 +155,7 @@ You can run E2E tests using either approach:
 **What this tests:**
 - Complete user workflow: typing message, sending, receiving response
 - Frontend-to-API integration with real backend calls
+- Real-time SSE streaming of agent reasoning (reason cards)
 - UI responsiveness across different screen sizes
 - Error handling and graceful degradation
 - Keyboard navigation and accessibility
@@ -173,6 +169,7 @@ You can run E2E tests using either approach:
 **What this tests:**
 - API health endpoint (`/`)
 - API chat endpoint (`/api/chat`) with real requests
+- SSE streaming endpoint (`/api/streams/{id}`) for real-time events
 - Frontend availability and content
 - Basic service-to-service communication
 
@@ -183,13 +180,39 @@ cd infra/terraform
 
 # Get all service URLs
 terraform output frontend_service_url
-terraform output api_service_url  
-terraform output worker_service_url
+terraform output api_service_url  # Includes integrated worker functionality
 
 # Get infrastructure details
 terraform output db_proxy_endpoint
 terraform output artifact_bucket_name
 ```
+
+## Real-Time Streaming Features
+
+### Server-Sent Events (SSE)
+The integrated architecture supports real-time streaming of agent reasoning:
+
+- **Reason Cards**: Live agent decision-making processes with confidence scores
+- **Node Events**: Start/completion notifications for workflow steps
+- **Progress Updates**: Real-time workflow progress with percentage completion
+- **Error Handling**: Immediate error notification with retry logic
+
+### Frontend Integration
+The React frontend connects to SSE streams automatically:
+
+```javascript
+// SSE endpoint: https://api-service-url.amazonaws.com/api/streams/{decision_set_id}
+const { reasonCards, workflowProgress, isConnected } = useStreamingEvents({
+  decisionSetId: 'workflow-123',
+  autoConnect: true
+});
+```
+
+### Event Deduplication
+Both backend and frontend implement comprehensive deduplication:
+- **Backend**: Prevents duplicate agent reason cards during processing
+- **Frontend**: Client-side deduplication with memory-efficient maps
+- **Robust Reconnection**: Automatic reconnection with exponential backoff
 
 ## Troubleshooting Common Issues
 
@@ -214,6 +237,18 @@ aws ecr get-login-password --region us-east-1 | docker login --username AWS --pa
 - Check security group allows connections from App Runner
 - Ensure VPC connector is properly configured
 
+### 5. SSE Streaming Issues
+- Check browser developer tools for SSE connection errors
+- Verify `NEXT_PUBLIC_API_BASE_URL` is correctly set in frontend
+- Test SSE endpoint directly: `curl -N https://api-url/api/streams/test-id`
+- Check CloudWatch logs for streaming service errors
+
+### 6. Worker Integration Issues
+- Verify background worker is starting in API server logs
+- Check `GRAPH_TYPE` environment variable is set correctly
+- Monitor job processing in database: `SELECT * FROM jobs WHERE status = 'processing';`
+- Ensure OpenAI/Anthropic API keys are configured for LLM agents
+
 ## Security Considerations
 
 ### CORS Configuration
@@ -234,13 +269,19 @@ aws ecr get-login-password --region us-east-1 | docker login --username AWS --pa
 ## Cost Optimization
 
 ### App Runner Pricing
+- **Reduced from 3 to 2 services**: ~33% cost reduction in compute resources
 - Pay per vCPU and memory used
 - Automatic scaling reduces costs during low traffic
 - No idle charges when services are not processing requests
 
+### Architecture Benefits
+- **Single Server Process**: Eliminates worker service costs while maintaining functionality
+- **Shared Memory**: Direct event sharing reduces memory overhead vs HTTP bridges
+- **Simplified Networking**: Fewer service-to-service connections reduce data transfer costs
+
 ### RDS Proxy Benefits
 - Connection pooling reduces database connection overhead
-- Better resource utilization
+- Better resource utilization with integrated worker
 - Improved application performance
 
 ## Cleanup

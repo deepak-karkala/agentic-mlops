@@ -68,15 +68,11 @@ class OpenAIClient:
     - Rate limiting and error handling
     """
 
-    # Model pricing per 1K tokens (approximate, update regularly)
+    # Model pricing per 1M tokens (approximate, update regularly)
     MODEL_PRICING = {
-        "gpt-5": {"input": 0.03, "output": 0.06},
-        "gpt-5-mini": {"input": 0.03, "output": 0.06},
-        "gpt-5-nano": {"input": 0.03, "output": 0.06},
-        "gpt-4": {"input": 0.03, "output": 0.06},
-        "gpt-4-turbo-preview": {"input": 0.01, "output": 0.03},
-        "gpt-3.5-turbo": {"input": 0.0005, "output": 0.0015},
-        "gpt-3.5-turbo-16k": {"input": 0.003, "output": 0.004},
+        "gpt-5": {"input": 1.25, "output": 10.0},
+        "gpt-5-mini": {"input": 0.25, "output": 2.0},
+        "gpt-5-nano": {"input": 0.05, "output": 0.4},
     }
 
     def __init__(
@@ -117,7 +113,6 @@ class OpenAIClient:
         messages: List[Dict[str, str]],
         response_format: Optional[Type[T]] = None,
         model: Optional[str] = None,
-        temperature: float = 0.7,
         max_tokens: Optional[int] = None,
         stream: bool = False,
     ) -> Union[str, T, AsyncGenerator]:
@@ -128,7 +123,6 @@ class OpenAIClient:
             messages: List of messages in OpenAI format
             response_format: Pydantic model for structured output
             model: Model to use (defaults to default_model)
-            temperature: Sampling temperature (0.0 to 2.0)
             max_tokens: Maximum tokens in response
             stream: Whether to stream the response
 
@@ -140,15 +134,15 @@ class OpenAIClient:
         try:
             if response_format:
                 return await self._complete_structured(
-                    messages, response_format, model, temperature, max_tokens
+                    messages, response_format, model, max_tokens
                 )
             elif stream:
                 return await self._complete_streaming(
-                    messages, model, temperature, max_tokens
+                    messages, model, max_tokens
                 )
             else:
                 return await self._complete_basic(
-                    messages, model, temperature, max_tokens
+                    messages, model, max_tokens
                 )
 
         except (LLMRateLimitError, LLMValidationError) as e:
@@ -164,7 +158,6 @@ class OpenAIClient:
                     messages,
                     response_format,
                     self.fallback_model,
-                    temperature,
                     max_tokens,
                     stream,
                 )
@@ -182,17 +175,19 @@ class OpenAIClient:
         self,
         messages: List[Dict[str, str]],
         model: str,
-        temperature: float,
         max_tokens: Optional[int],
     ) -> str:
         """Basic completion without structured output."""
         try:
-            response = await self.client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
+            # Build parameters, excluding None values
+            params = {
+                "model": model,
+                "messages": messages,
+            }
+            if max_tokens is not None:
+                params["max_tokens"] = max_tokens
+
+            response = await self.client.chat.completions.create(**params)
 
             # Track usage
             usage = response.usage
@@ -210,7 +205,6 @@ class OpenAIClient:
         messages: List[Dict[str, str]],
         response_format: Type[T],
         model: str,
-        temperature: float,
         max_tokens: Optional[int],
     ) -> T:
         """
@@ -232,7 +226,7 @@ class OpenAIClient:
         for attempt in range(self.max_retries):
             try:
                 raw_response = await self._complete_basic(
-                    enhanced_messages, model, temperature, max_tokens
+                    enhanced_messages, model, max_tokens
                 )
 
                 # Parse and validate structured response
@@ -262,18 +256,20 @@ class OpenAIClient:
         self,
         messages: List[Dict[str, str]],
         model: str,
-        temperature: float,
         max_tokens: Optional[int],
     ):
         """Streaming completion generator."""
         try:
-            stream = await self.client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                stream=True,
-            )
+            # Build parameters, excluding None values
+            params = {
+                "model": model,
+                "messages": messages,
+                "stream": True,
+            }
+            if max_tokens is not None:
+                params["max_tokens"] = max_tokens
+
+            stream = await self.client.chat.completions.create(**params)
 
             async for chunk in stream:
                 if chunk.choices[0].delta.content is not None:
@@ -346,8 +342,8 @@ Example response format:
 
         # Estimate cost
         pricing = self.MODEL_PRICING.get(model, {"input": 0.001, "output": 0.002})
-        estimated_cost = (prompt_tokens / 1000) * pricing["input"] + (
-            completion_tokens / 1000
+        estimated_cost = (prompt_tokens / 1000000) * pricing["input"] + (
+            completion_tokens / 1000000
         ) * pricing["output"]
 
         # Record usage
@@ -420,14 +416,14 @@ _client_instance: Optional[OpenAIClient] = None
 
 
 def get_llm_client(
-    api_key: Optional[str] = None, default_model: str = "gpt-4-turbo-preview"
+    api_key: Optional[str] = None, default_model: Optional[str] = None
 ) -> OpenAIClient:
     """
     Get global LLM client instance.
 
     Args:
         api_key: OpenAI API key (optional)
-        default_model: Default model to use
+        default_model: Default model to use (optional, will read from OPENAI_MODEL env var)
 
     Returns:
         Configured OpenAI client instance
@@ -435,6 +431,12 @@ def get_llm_client(
     global _client_instance
 
     if _client_instance is None:
+        # Use environment variable if no default_model is provided
+        if default_model is None:
+            default_model = os.getenv("OPENAI_MODEL")
+            if not default_model:
+                raise ValueError("OPENAI_MODEL environment variable must be set")
+
         _client_instance = OpenAIClient(api_key=api_key, default_model=default_model)
 
     return _client_instance
@@ -444,8 +446,7 @@ def get_llm_client(
 async def complete_with_llm(
     prompt: str,
     response_format: Optional[Type[T]] = None,
-    model: str = "gpt-4-turbo-preview",
-    temperature: float = 0.7,
+    model: Optional[str] = None,
 ) -> Union[str, T]:
     """
     Quick completion function for simple use cases.
@@ -454,12 +455,17 @@ async def complete_with_llm(
         prompt: User prompt
         response_format: Optional Pydantic model for structured output
         model: Model to use
-        temperature: Sampling temperature
 
     Returns:
         Raw string or parsed structured response
     """
     client = get_llm_client()
+
+    # Use environment variable if no model is provided
+    if model is None:
+        model = os.getenv("OPENAI_MODEL")
+        if not model:
+            raise ValueError("OPENAI_MODEL environment variable must be set")
 
     messages = [{"role": "user", "content": prompt}]
 
@@ -467,5 +473,4 @@ async def complete_with_llm(
         messages=messages,
         response_format=response_format,
         model=model,
-        temperature=temperature,
     )

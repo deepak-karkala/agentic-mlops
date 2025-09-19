@@ -174,8 +174,7 @@ Provide specific, actionable recommendations with clear rationale and implementa
             name="LLM Technical Critic",
             description="LLM-powered technical architecture analysis and risk assessment",
             system_prompt=self.SYSTEM_PROMPT,
-            model="gpt-4-turbo-preview",
-            temperature=0.1,  # Very low temperature for consistent technical analysis
+            # model will be read from OPENAI_MODEL environment variable
         )
 
     async def get_structured_output_type(self) -> Type[TechCriticOutput]:

@@ -193,8 +193,7 @@ Focus on policy requirements that meaningfully impact the proposed architecture 
             name="LLM Policy Engine",
             description="LLM-powered governance and compliance validation",
             system_prompt=self.SYSTEM_PROMPT,
-            model="gpt-4-turbo-preview",
-            temperature=0.1,  # Very low temperature for consistent policy analysis
+            # model will be read from OPENAI_MODEL environment variable
         )
 
     async def get_structured_output_type(self) -> Type[PolicyEngineOutput]:
