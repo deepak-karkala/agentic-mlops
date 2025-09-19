@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import time
 from typing import Any, Dict, List, Optional, Type, TypeVar
+import os
 from abc import abstractmethod
 
 from .agent_framework import (
@@ -28,6 +29,17 @@ from pydantic import BaseModel
 T = TypeVar("T", bound=BaseModel)
 
 logger = logging.getLogger(__name__)
+
+
+def is_mock_mode_enabled() -> bool:
+    """Return True when MOCK_MODE feature flag is enabled."""
+    flag = os.getenv("MOCK_MODE", "")
+    if flag:
+        return flag.lower() in {"1", "true", "yes", "on"}
+
+    # Backward compatibility with older flag name
+    legacy_flag = os.getenv("ENABLE_MOCK_AGENTS", "")
+    return legacy_flag.lower() in {"1", "true", "yes", "on"}
 
 
 class MLOpsExecutionContext:
@@ -279,6 +291,16 @@ class BaseLLMAgent(BaseMLOpsAgent):
                 },
             )
 
+            if is_mock_mode_enabled():
+                logger.info(
+                    "Mock mode enabled; returning synthetic output",
+                    extra={
+                        "agent": self.agent_type.value,
+                        "thread_id": thread_id,
+                    },
+                )
+                return await self._execute_mock(context, trigger, state)
+
             # Build messages for LLM
             user_prompt = self.build_user_prompt(context)
             messages = [
@@ -323,6 +345,37 @@ class BaseLLMAgent(BaseMLOpsAgent):
             return self._create_error_output(
                 trigger, f"Agent execution failed: {str(e)}", state
             )
+
+    async def _execute_mock(
+        self,
+        context: MLOpsExecutionContext,
+        trigger: TriggerType,
+        state: MLOpsWorkflowState,
+    ) -> AgentOutput:
+        """Execute the agent using synthetic outputs for mock mode."""
+        mock_response = await self.build_mock_response(context, state)
+
+        reason_card = await self.create_reason_card_from_llm(
+            mock_response, context, trigger
+        )
+        state_updates = await self.extract_state_updates(mock_response, state)
+        self.log_execution(state, reason_card)
+        next_agent_context = await self.build_next_agent_context(mock_response)
+
+        return AgentOutput(
+            success=True,
+            reason_card=reason_card,
+            state_updates=state_updates,
+            next_agent_context=next_agent_context,
+        )
+
+    async def build_mock_response(
+        self, context: MLOpsExecutionContext, state: MLOpsWorkflowState
+    ) -> BaseModel:
+        """Build a synthetic structured response for mock mode."""
+        raise NotImplementedError(
+            f"Mock response not implemented for agent: {self.agent_type.value}"
+        )
 
     async def process_llm_response(
         self,

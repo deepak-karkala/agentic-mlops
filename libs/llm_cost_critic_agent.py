@@ -391,6 +391,116 @@ Be thorough but practical - focus on cost factors that meaningfully impact the b
             "summary": f"Cost analysis complete: ${llm_response.estimated_monthly_cost}/month ({llm_response.budget_compliance_status} budget compliance, {llm_response.cost_confidence:.1%} confidence)",
         }
 
+    async def build_mock_response(
+        self, context: MLOpsExecutionContext, state: MLOpsWorkflowState
+    ) -> CostCriticOutput:
+        """Return deterministic cost analysis for mock mode."""
+        return CostCriticOutput(
+            estimated_monthly_cost=350.0,
+            cost_confidence=0.9,
+            cost_analysis_summary="Estimated spend aligns with startup budget while preserving scale headroom.",
+            service_costs=[
+                {"service": "lambda", "cost": 50.0, "description": "Request execution"},
+                {"service": "sagemaker", "cost": 150.0, "description": "Model hosting"},
+                {"service": "apigateway", "cost": 125.0, "description": "Public API traffic"},
+                {"service": "s3", "cost": 25.0, "description": "Artifact storage"},
+            ],
+            infrastructure_costs=[
+                {"component": "compute", "cost": 200.0, "details": "Lambda + SageMaker"},
+                {"component": "storage", "cost": 25.0, "details": "S3 buckets"},
+                {"component": "networking", "cost": 125.0, "details": "API Gateway"},
+            ],
+            operational_costs=[
+                {"component": "monitoring", "cost": 15.0, "details": "CloudWatch"},
+                {"component": "security", "cost": 5.0, "details": "IAM management"},
+            ],
+            primary_cost_drivers=[
+                "SageMaker endpoint uptime",
+                "API Gateway request volume",
+                "Lambda execution duration",
+            ],
+            cost_distribution={"compute": 57.0, "storage": 7.0, "networking": 36.0},
+            variable_vs_fixed={"variable": 80.0, "fixed": 20.0},
+            budget_compliance_status="pass",
+            budget_utilization=0.88,
+            budget_risk_assessment="Low risk; comfortable buffer beneath startup cap.",
+            cost_scaling_factors=[
+                "Request throughput",
+                "Inference runtime",
+                "Training cadence",
+            ],
+            scaling_cost_projections={"2x_load": 700.0, "5x_load": 1750.0, "10x_load": 3500.0},
+            break_even_analysis="Break-even at ~1,000 automated decisions per month versus manual process.",
+            cost_optimization_recommendations=[
+                "Leverage provisioned concurrency sparingly",
+                "Enable result caching for hot paths",
+                "Right-size SageMaker instance class",
+            ],
+            alternative_architectures=[
+                {
+                    "name": "Container-based ML platform",
+                    "estimated_cost": 450.0,
+                    "pros": ["Greater control"],
+                    "cons": ["Higher operational load"],
+                },
+                {
+                    "name": "Managed ML platform",
+                    "estimated_cost": 600.0,
+                    "pros": ["Minimal operations"],
+                    "cons": ["Budget overrun"],
+                },
+            ],
+            reserved_instance_opportunities=[
+                "SageMaker savings plans",
+                "Lambda provisioned concurrency discounts",
+            ],
+            potential_hidden_costs=[
+                "Cross-region data transfer",
+                "Experimentation workloads",
+                "Third-party integrations",
+            ],
+            cost_volatility_factors=[
+                "Traffic spikes",
+                "Model retraining frequency",
+                "AWS pricing adjustments",
+            ],
+            billing_complexity_notes=[
+                "Multiple usage-based services",
+                "Recommend tagging for cost attribution",
+            ],
+            expected_roi_timeline="6-12 months driven by automation efficiencies.",
+            value_propositions=[
+                "Elastic scaling",
+                "Lower ops headcount",
+                "Pay-per-use consumption",
+            ],
+            cost_vs_benefit_analysis="Favorable cost-to-value ratio for automated inference workloads.",
+            cost_monitoring_strategy=[
+                "Daily anomaly detection",
+                "Weekly spend review",
+                "Per-service dashboards",
+            ],
+            budget_alerts_recommended=[
+                {"threshold": 300.0, "type": "warning", "action": "Review usage"},
+                {"threshold": 400.0, "type": "critical", "action": "Throttle non-essential workloads"},
+            ],
+            cost_governance_needs=[
+                "Monthly stakeholder check-in",
+                "Tagging compliance",
+            ],
+            cost_assumptions=[
+                "US-East-1 pricing",
+                "No enterprise discounts",
+                "Lambda duration under 1s",
+            ],
+            pricing_methodology="AWS Pricing Calculator with forecasted usage",
+            cost_analysis_limitations=[
+                "Does not include experimentation cluster",
+                "Assumes steady traffic",
+                "Excludes premium support",
+            ],
+        )
+
 
 def create_llm_cost_critic_agent() -> LLMCostCriticAgent:
     """Factory function to create a configured LLMCostCriticAgent."""

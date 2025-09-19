@@ -357,6 +357,55 @@ Be thorough but practical - focus on issues that meaningfully impact system succ
             "summary": f"Technical analysis complete: {llm_response.technical_feasibility_score:.1%} feasibility, {len(llm_response.technical_risks)} critical risks, {llm_response.architecture_confidence:.1%} confidence",
         }
 
+    async def build_mock_response(
+        self, context: MLOpsExecutionContext, state: MLOpsWorkflowState
+    ) -> TechCriticOutput:
+        """Return deterministic technical assessment for mock mode."""
+        return TechCriticOutput(
+            technical_feasibility_score=0.85,
+            architecture_confidence=0.8,
+            criticism_summary="Architecture is feasible with manageable latency and reliability considerations.",
+            technical_risks=["Lambda cold-start latency", "SageMaker endpoint warm-up"],
+            architecture_concerns=["API Gateway as single ingress point"],
+            scalability_risks=["Provisioned concurrency tuning required"],
+            security_concerns=["Ensure IAM policies remain least-privilege"],
+            performance_bottlenecks=["Model loading time", "Feature enrichment within Lambda"],
+            capacity_constraints=["Lambda memory footprint", "Endpoint throughput ceiling"],
+            integration_challenges=["Synchronizing feature store updates", "Maintaining schema compatibility"],
+            single_points_of_failure=["API Gateway"],
+            failure_domains=["Lambda region", "SageMaker availability zone"],
+            disaster_recovery_gaps=["No cross-region standby"],
+            risk_mitigation_strategies=[
+                "Enable Lambda warming schedule",
+                "Deploy multi-AZ SageMaker endpoints",
+            ],
+            architecture_improvements=[
+                "Introduce regional failover",
+                "Add caching for popular inferences",
+            ],
+            monitoring_requirements=[
+                "CloudWatch latency alarms",
+                "Model drift detection",
+            ],
+            operational_complexity="Low-to-medium ops load with IaC automation and managed services.",
+            maintenance_requirements=[
+                "Monthly dependency updates",
+                "Quarterly chaos tests",
+            ],
+            skill_requirements=["AWS Lambda", "SageMaker", "Terraform"],
+            availability_impact="Medium",
+            performance_impact="Low",
+            security_impact="Medium",
+            analysis_assumptions=[
+                "Traffic evenly distributed",
+                "Models under 5GB",
+            ],
+            analysis_limitations=[
+                "No production load tests",
+                "Pending security review",
+            ],
+        )
+
 
 def create_llm_tech_critic_agent() -> LLMTechCriticAgent:
     """Factory function to create a configured LLMTechCriticAgent."""

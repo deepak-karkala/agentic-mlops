@@ -228,6 +228,30 @@ Focus on practical completeness rather than theoretical perfection. The goal is 
             "summary": f"Coverage analysis: {llm_response.coverage_score:.1%} complete, {'meets' if llm_response.coverage_threshold_met else 'fails'} threshold, {len(llm_response.missing_critical_fields)} critical gaps",
         }
 
+    async def build_mock_response(
+        self, context: MLOpsExecutionContext, state: MLOpsWorkflowState
+    ) -> CoverageAnalysisResult:
+        """Return a deterministic coverage analysis for mock mode."""
+        coverage_score = 0.74
+        constraints = context.constraints
+        if constraints and constraints.missing_fields:
+            coverage_score = max(0.6, 0.78 - len(constraints.missing_fields) * 0.05)
+
+        return CoverageAnalysisResult(
+            coverage_score=coverage_score,
+            missing_critical_fields=["budget_band", "regions"]
+            if coverage_score < 0.75
+            else ["regions"],
+            missing_optional_fields=["data_retention_policy", "observability_tooling"],
+            ambiguous_fields=["regional_expansion_plan"],
+            coverage_threshold_met=coverage_score >= 0.7,
+            recommendations=[
+                "Confirm target AWS regions to finalize networking design",
+                "Capture data retention requirements for compliance",
+                "Identify observability tooling preferences",
+            ],
+        )
+
 
 def create_coverage_check_agent() -> CoverageCheckAgent:
     """Factory function to create a configured CoverageCheckAgent."""
