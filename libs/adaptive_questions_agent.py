@@ -13,6 +13,7 @@ import logging
 from .llm_agent_base import BaseLLMAgent, MLOpsExecutionContext
 from .agent_framework import AgentType, MLOpsWorkflowState
 from .constraint_schema import AdaptiveQuestioningResult
+from .mock_agents import create_mock_adaptive_questions_agent
 
 logger = logging.getLogger(__name__)
 
@@ -305,6 +306,13 @@ Focus on practical completeness that enables confident architecture recommendati
             and llm_response.current_coverage >= 0.7,
             "summary": f"Generated {len(llm_response.questions)} questions, {'ready for planning' if llm_response.questioning_complete else 'awaiting user responses'}",
         }
+
+    async def build_mock_response(
+        self, context: MLOpsExecutionContext, state: MLOpsWorkflowState
+    ) -> AdaptiveQuestioningResult:
+        """Return deterministic follow-up questions without external API calls."""
+        mock_agent = create_mock_adaptive_questions_agent()
+        return mock_agent.generate_mock_questions(context.state)
 
     async def should_continue_questioning(
         self,

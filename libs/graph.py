@@ -29,6 +29,7 @@ from libs.llm_planner_agent import create_llm_planner_agent
 from libs.llm_tech_critic_agent import create_llm_tech_critic_agent
 from libs.llm_cost_critic_agent import create_llm_cost_critic_agent
 from libs.llm_policy_engine_agent import create_llm_policy_engine_agent
+from libs.llm_agent_base import is_mock_mode_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -526,7 +527,9 @@ def critic_tech(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
 
     try:
         # Execute agent directly with MLOpsWorkflowState - no conversion needed
-        result = asyncio.run(llm_tech_critic_agent.execute(state, TriggerType.INITIAL))
+        result = _safe_async_run(
+            llm_tech_critic_agent.execute(state, TriggerType.INITIAL)
+        )
 
         if result.success:
             # Extract state updates from the agent result
@@ -643,7 +646,9 @@ def critic_cost(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
 
     try:
         # Execute agent directly with MLOpsWorkflowState - no conversion needed
-        result = asyncio.run(llm_cost_critic_agent.execute(state, TriggerType.INITIAL))
+        result = _safe_async_run(
+            llm_cost_critic_agent.execute(state, TriggerType.INITIAL)
+        )
 
         if result.success:
             # Extract state updates from the agent result
@@ -762,7 +767,7 @@ def policy_eval(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
 
     try:
         # Execute agent directly with MLOpsWorkflowState - no conversion needed
-        result = asyncio.run(
+        result = _safe_async_run(
             llm_policy_engine_agent.execute(state, TriggerType.INITIAL)
         )
 
@@ -1073,9 +1078,37 @@ async def _codegen_async(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
 
 def codegen(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
     """Synchronous wrapper for async code generation."""
-    import asyncio
+    if is_mock_mode_enabled():
+        logger.info("Mock mode enabled; returning synthetic code generation output")
+        artifacts = [
+            {
+                "path": "infra/main.tf",
+                "type": "infrastructure",
+                "description": "Mock Terraform entrypoint",
+                "size_bytes": 2048,
+            },
+            {
+                "path": "services/api/main.py",
+                "type": "service",
+                "description": "Mock FastAPI skeleton",
+                "size_bytes": 4096,
+            },
+            {
+                "path": "ci/github/workflows/tests.yml",
+                "type": "ci",
+                "description": "Mock CI pipeline",
+                "size_bytes": 1024,
+            },
+        ]
+        repository = {
+            "name": "mock-mlops-repo",
+            "size_bytes": 8192,
+            "s3_url": None,
+            "zip_key": "mock-mlops-repo.zip",
+        }
+        return {"artifacts": artifacts, "repository": repository}
 
-    return asyncio.run(_codegen_async(state))
+    return _safe_async_run(_codegen_async(state))
 
 
 async def _validators_async(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
@@ -1162,9 +1195,36 @@ async def _validators_async(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
 
 def validators(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
     """Synchronous wrapper for async validation."""
-    import asyncio
+    if is_mock_mode_enabled():
+        logger.info("Mock mode enabled; returning synthetic validation report")
+        artifact_count = len(state.get("artifacts", []))
+        return {
+            "reports": {
+                "overall_status": "pass" if artifact_count else "skipped",
+                "artifacts_validated": artifact_count,
+                "issues_found": 0,
+                "checks": [
+                    {
+                        "name": "terraform_fmt",
+                        "status": "pass",
+                        "details": "Mock format check passed",
+                    },
+                    {
+                        "name": "pytest_smoke",
+                        "status": "pass",
+                        "details": "Mock test suite green",
+                    },
+                    {
+                        "name": "lint",
+                        "status": "warn",
+                        "details": "Mock lint suggests naming refinement",
+                    },
+                ],
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        }
 
-    return asyncio.run(_validators_async(state))
+    return _safe_async_run(_validators_async(state))
 
 
 async def _create_validation_test_structure(temp_path, artifacts, state):

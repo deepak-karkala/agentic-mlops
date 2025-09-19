@@ -431,6 +431,75 @@ Be thorough but practical - focus on policy requirements that meaningfully impac
             "summary": f"Policy analysis complete: {llm_response.overall_compliance_status} compliance ({llm_response.compliance_score:.1%}), {len(llm_response.critical_violations)} critical violations, escalation {'required' if llm_response.escalation_required else 'not required'}",
         }
 
+    async def build_mock_response(
+        self, context: MLOpsExecutionContext, state: MLOpsWorkflowState
+    ) -> PolicyEngineOutput:
+        """Return deterministic policy evaluation for mock mode."""
+        return PolicyEngineOutput(
+            overall_compliance_status="pass",
+            compliance_score=0.9,
+            policy_assessment_summary="Baseline controls satisfied with minor governance recommendations.",
+            policy_rule_results=[
+                {"rule": "budget_limit", "status": "pass", "details": "Projected spend within approved band"},
+                {"rule": "security_baseline", "status": "pass", "details": "Encryption and IAM controls configured"},
+                {"rule": "data_governance", "status": "warn", "details": "Document data retention timeline"},
+            ],
+            critical_violations=[],
+            warnings=["Consider multi-region backup for higher resilience"],
+            security_compliance={
+                "status": "compliant",
+                "score": 0.85,
+                "gaps": ["Enforce MFA for all IAM users", "Publish incident response plan"],
+            },
+            data_governance_compliance={
+                "status": "compliant",
+                "score": 0.9,
+                "gaps": ["Finalize data retention policy", "Classify sensitive datasets"],
+            },
+            operational_compliance={
+                "status": "compliant",
+                "score": 0.95,
+                "gaps": ["Schedule disaster recovery test"]
+            },
+            financial_compliance={
+                "status": "compliant",
+                "score": 1.0,
+                "gaps": [],
+            },
+            regulatory_requirements=[
+                {"regulation": "SOX", "status": "not_applicable", "reason": "No financial reporting"},
+                {"regulation": "GDPR", "status": "needs_review", "reason": "Potential EU personal data"},
+            ],
+            compliance_gaps=["Document data classification", "Implement cross-region backup"],
+            audit_readiness="needs_work",
+            compliance_risks=["Data loss", "Privacy violation"],
+            risk_mitigation_requirements=[
+                "Add cross-region backup plan",
+                "Publish data lifecycle SOP",
+            ],
+            escalation_required=False,
+            immediate_actions_required=["Configure cost anomaly alerts"],
+            recommended_policy_adjustments=["Add data classification policy"],
+            alternative_approaches=[
+                {
+                    "approach": "Enhanced security",
+                    "details": "Enable organization-wide MFA and log archive",
+                    "impact": "Improved security posture",
+                }
+            ],
+            governance_controls_needed=["Quarterly access reviews", "Budget governance committee"],
+            monitoring_requirements=["Compliance dashboards", "Policy breach alerts"],
+            documentation_requirements=["Data handling SOP", "Security checklist"],
+            stakeholder_notifications=["Security team", "Compliance officer"],
+            approval_requirements=["Security sign-off prior to production"],
+            change_management_needs=["Communicate new retention policy"],
+            policies_evaluated=["security_baseline", "budget_policy", "data_governance"],
+            policy_exceptions_needed=["Temporary relaxed logging in dev"],
+            policy_review_recommendations=["Review data governance quarterly"],
+            assessment_confidence=0.8,
+            assessment_limitations=["Security penetration test pending", "Limited compliance evidence"],
+        )
+
 
 def create_llm_policy_engine_agent() -> LLMPolicyEngineAgent:
     """Factory function to create a configured LLMPolicyEngineAgent."""

@@ -279,6 +279,70 @@ Consider both immediate requirements and future evolution needs. Be practical an
             "summary": f"Selected {llm_response.pattern_name} pattern (${llm_response.estimated_monthly_cost}/month, {llm_response.selection_confidence:.1%} confidence)",
         }
 
+    async def build_mock_response(
+        self, context: MLOpsExecutionContext, state: MLOpsWorkflowState
+    ) -> PlannerOutput:
+        """Return deterministic planning output for mock mode."""
+        return PlannerOutput(
+            selected_pattern_id="serverless_ml_stack",
+            pattern_name="Serverless ML Inference Stack",
+            selection_confidence=0.88,
+            selection_rationale="Selected serverless pattern for low-ops startup needs and dynamic scaling without container management overhead.",
+            alternatives_considered=[
+                {
+                    "pattern": "container_ml_platform",
+                    "fit_score": 0.72,
+                    "notes": "Higher ops burden for small team",
+                },
+                {
+                    "pattern": "managed_ml_platform",
+                    "fit_score": 0.65,
+                    "notes": "Exceeds budget constraints",
+                },
+            ],
+            pattern_comparison="Serverless stack offers lowest operational overhead compared to container or managed platform alternatives while meeting throughput targets.",
+            architecture_overview="API Gateway triggers Lambda that invokes SageMaker endpoints for real-time inference, backed by Step Functions for batch processing and S3 data lake.",
+            key_services={
+                "apigateway": "Public API endpoint with request throttling",
+                "lambda": "Lightweight request routing and feature prep",
+                "sagemaker": "Managed model inference endpoint",
+                "eventbridge": "Asynchronous workflow orchestration",
+                "s3": "Artifact and feature storage",
+            },
+            estimated_monthly_cost=350.0,
+            deployment_approach="Infrastructure-as-code with staged environments (dev/staging/prod)",
+            implementation_phases=[
+                "Baseline MVP deployment",
+                "Observability & alerting",
+                "Automation and scale hardening",
+            ],
+            critical_success_factors=[
+                "Model optimization to reduce cold-start latency",
+                "Automated retraining pipeline",
+                "Comprehensive monitoring dashboards",
+            ],
+            potential_challenges=[
+                "Lambda cold starts impacting p95 latency",
+                "Coordinating model version rollouts",
+                "Managing per-endpoint concurrency limits",
+            ],
+            success_metrics=[
+                "p95 latency under 250ms",
+                "99.5% request success rate",
+                "Monthly spend under $400",
+            ],
+            assumptions_made=[
+                "Peak concurrency under 1000",
+                "Models under 5GB",
+                "Single-region deployment",
+            ],
+            decision_criteria=[
+                "Budget compliance",
+                "Operational simplicity",
+                "Elastic scaling",
+            ],
+        )
+
     def get_pattern_library_summary(self) -> str:
         """Get a concise summary of MLOps architecture approaches."""
         return """Available MLOps Architecture Patterns:

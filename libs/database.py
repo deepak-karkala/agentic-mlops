@@ -68,6 +68,12 @@ def create_database_engine(database_url: Optional[str] = None) -> Engine:
             connect_args={"check_same_thread": False},
             echo=False,
         )
+
+        # Automatically create tables for SQLite development databases to
+        # prevent missing-table errors when migrations haven't been run.
+        from libs.models import create_all_tables
+
+        create_all_tables(engine)
     else:
         # PostgreSQL configuration
         engine = create_engine(

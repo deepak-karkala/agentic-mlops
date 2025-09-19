@@ -553,7 +553,6 @@ async def stream_workflow_progress(decision_set_id: str, db: Session = Depends(g
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",  # Configure based on your CORS policy
         },
     )
 

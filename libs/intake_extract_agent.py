@@ -12,7 +12,15 @@ import logging
 
 from .llm_agent_base import BaseLLMAgent, MLOpsExecutionContext
 from .agent_framework import AgentType, MLOpsWorkflowState
-from .constraint_schema import ConstraintExtractionResult
+from .constraint_schema import (
+    ConstraintExtractionResult,
+    MLOpsConstraints,
+    BudgetBand,
+    DeploymentPreference,
+    WorkloadType,
+    ThroughputLevel,
+    DataClassification,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +212,55 @@ Provide a complete ConstraintExtractionResult with your analysis.
             "follow_up_recommended": llm_response.follow_up_needed,
             "summary": f"Extracted {len([f for f in llm_response.constraints.model_dump() if llm_response.constraints.model_dump()[f] is not None])} constraint fields with {llm_response.extraction_confidence:.1%} confidence",
         }
+
+    async def build_mock_response(
+        self, context: MLOpsExecutionContext, state: MLOpsWorkflowState
+    ) -> ConstraintExtractionResult:
+        """Return deterministic constraint extraction for mock mode."""
+        description = context.user_input or "Mock real-time recommendation platform"
+
+        constraints = MLOpsConstraints(
+            project_description=description,
+            project_name="Mock MLOps Platform",
+            budget_band=BudgetBand.STARTUP,
+            deployment_preference=DeploymentPreference.SERVERLESS,
+            workload_types=[
+                WorkloadType.ONLINE_INFERENCE,
+                WorkloadType.BATCH_TRAINING,
+            ],
+            expected_throughput=ThroughputLevel.MEDIUM,
+            latency_requirements_ms=250,
+            data_classification=DataClassification.INTERNAL,
+            data_sources=["Salesforce", "Redshift", "S3 data lake"],
+            compliance_requirements=["SOC2"],
+            regions=["us-east-1"],
+            availability_target=99.0,
+            disaster_recovery_required=True,
+            model_types=["classification", "recommendation"],
+            model_size_category="medium",
+            training_frequency="daily",
+            integration_requirements=["Slack", "Snowflake"],
+            authentication_methods=["IAM", "OAuth"],
+            team_size=6,
+            team_expertise=["ml_engineering", "devops", "data_engineering"],
+            operational_preferences=["managed_services", "infrastructure_as_code"],
+            maintenance_window="Sundays 02:00-04:00 UTC",
+            monitoring_requirements=["latency", "error_rate", "model_drift"],
+            logging_requirements=["structured_logs", "audit_trail"],
+            testing_requirements=["canary", "integration"],
+            extracted_confidence=0.85,
+            missing_fields=["data_retention_policy"],
+            ambiguous_fields=["regional_expansion_plan"],
+            extraction_method="mock_mode",
+        )
+
+        return ConstraintExtractionResult(
+            constraints=constraints,
+            extraction_confidence=0.82,
+            uncertain_fields=["regional_expansion_plan", "data_retention_policy"],
+            extraction_rationale="Synthesized constraints for UI testing without external LLM calls.",
+            follow_up_needed=True,
+        )
 
 
 def create_intake_extract_agent() -> IntakeExtractAgent:
