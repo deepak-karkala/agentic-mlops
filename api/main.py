@@ -159,6 +159,11 @@ class ApprovalResponse(BaseModel):
     approval_status: str
 
 
+class WorkflowPlanResponse(BaseModel):
+    nodes: List[str]
+    graph_type: str
+
+
 # Select graph based on env flag, with safe fallback
 # Support both legacy USE_FULL_GRAPH and new GRAPH_TYPE environment variables
 USE_FULL_GRAPH = os.getenv("USE_FULL_GRAPH", "false").lower() in {"1", "true", "yes"}
@@ -487,12 +492,44 @@ async def stream_workflow_progress(decision_set_id: str, db: Session = Depends(g
     logger.info(f"SSE connection established for decision_set_id: {decision_set_id}")
 
     # Verify decision set exists
-    decision_set = (
-        db.query(DecisionSet).filter(DecisionSet.id == decision_set_id).first()
-    )
-    if not decision_set:
-        logger.warning(f"Decision set not found: {decision_set_id}")
-        raise HTTPException(status_code=404, detail="Decision set not found")
+    decision_set = None
+    retry_delay = float(os.getenv("STREAM_DECISION_SET_RETRY_DELAY", "0.2"))
+    max_wait_seconds = float(os.getenv("STREAM_DECISION_SET_MAX_WAIT", "6.0"))
+
+    loop = asyncio.get_running_loop()
+    start_time = loop.time()
+    attempts = 0
+    while True:
+        decision_set = (
+            db.query(DecisionSet).filter(DecisionSet.id == decision_set_id).first()
+        )
+        if decision_set:
+            break
+
+        attempts += 1
+        elapsed = loop.time() - start_time
+        if elapsed >= max_wait_seconds:
+            logger.warning(
+                "Decision set not found after waiting",
+                extra={
+                    "decision_set_id": decision_set_id,
+                    "attempts": attempts,
+                    "wait_seconds": round(elapsed, 3),
+                },
+            )
+            raise HTTPException(status_code=404, detail="Decision set not found")
+
+        await asyncio.sleep(retry_delay)
+
+    if attempts:
+        logger.info(
+            "Decision set lookup succeeded after retries",
+            extra={
+                "decision_set_id": decision_set_id,
+                "attempts": attempts,
+                "wait_seconds": round(loop.time() - start_time, 3),
+            },
+        )
 
     # Get the streaming service instance
     streaming_service = get_streaming_service()
@@ -617,6 +654,16 @@ async def emit_streaming_event(
     except Exception as e:
         logger.exception(f"Failed to emit streaming event: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to emit event: {str(e)}")
+
+
+@app.get("/api/workflow/plan", response_model=WorkflowPlanResponse)
+def get_workflow_plan() -> WorkflowPlanResponse:
+    """Return the canonical workflow execution plan for the active graph."""
+
+    from libs.graph import get_execution_plan
+
+    plan = get_execution_plan()
+    return WorkflowPlanResponse(nodes=plan, graph_type=GRAPH_TYPE)
 
 
 # ============================================================================

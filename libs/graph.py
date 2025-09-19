@@ -73,6 +73,20 @@ _llm_policy_engine_agent = None
 # Legacy _get_agents() function removed - using only LLM-powered agents
 
 
+_graph_execution_plan: list[str] = []
+
+
+def _set_execution_plan(nodes: list[str]) -> None:
+    """Store the canonical execution plan for the active graph."""
+    global _graph_execution_plan
+    _graph_execution_plan = nodes
+
+
+def get_execution_plan() -> list[str]:
+    """Return the current graph execution plan."""
+    return list(_graph_execution_plan)
+
+
 def _get_llm_agents():
     """Lazy initialization of LLM-powered agents."""
     global \
@@ -1390,6 +1404,24 @@ def build_full_graph() -> Pregel:
     graph.add_edge("rationale_compile", "diff_and_persist")
     graph.add_edge("diff_and_persist", END)
 
+    _set_execution_plan(
+        [
+            "intake_extract",
+            "coverage_check",
+            "adaptive_questions",
+            "hitl_gate_input",
+            "planner",
+            "critic_tech",
+            "critic_cost",
+            "policy_eval",
+            "hitl_gate_final",
+            "codegen",
+            "validators",
+            "rationale_compile",
+            "diff_and_persist",
+        ]
+    )
+
     # Prefer async-compatible checkpointer when available
     checkpointer = _safe_async_run(create_async_checkpointer())
     if checkpointer is None:
@@ -1432,6 +1464,16 @@ def build_hitl_graph() -> Pregel:
     graph.add_edge("adaptive_questions", "gate_hitl")
     graph.add_edge("gate_hitl", "planner")
     graph.add_edge("planner", END)
+
+    _set_execution_plan(
+        [
+            "intake_extract",
+            "coverage_check",
+            "adaptive_questions",
+            "gate_hitl",
+            "planner",
+        ]
+    )
 
     # Prefer async-compatible checkpointer when available
     checkpointer = _safe_async_run(create_async_checkpointer())
@@ -1488,6 +1530,16 @@ def build_hitl_enhanced_graph() -> Pregel:
         }
     )
     graph.add_edge("planner", END)
+
+    _set_execution_plan(
+        [
+            "intake_extract",
+            "coverage_check",
+            "adaptive_questions",
+            "hitl_gate_user",
+            "planner",
+        ]
+    )
 
     # Use checkpointer for workflow interruption/resumption
     checkpointer = _safe_async_run(create_async_checkpointer())
@@ -2033,6 +2085,8 @@ def build_streaming_test_graph() -> Pregel:
     graph.add_edge("intake_extract", "codegen")
     graph.add_edge("codegen", END)
 
+    _set_execution_plan(["intake_extract", "codegen"])
+
     # Prefer async-compatible checkpointer when available to support astream()
     checkpointer = _safe_async_run(create_async_checkpointer())
     if checkpointer is None:
@@ -2066,6 +2120,8 @@ def build_thin_graph() -> Pregel:
     # Define the execution flow: START -> call_llm -> END
     graph.add_edge(START, "call_llm")
     graph.add_edge("call_llm", END)
+
+    _set_execution_plan(["call_llm"])
 
     # Prefer async-compatible checkpointer when available
     checkpointer = _safe_async_run(create_async_checkpointer())

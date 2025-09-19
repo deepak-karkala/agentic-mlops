@@ -13,7 +13,7 @@ import { Input } from "../ui/input";
 import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { Message, ChatState } from "../../types/chat";
-import { WorkflowContainer } from "../streaming/workflow-container";
+import { WorkflowVisualization } from "../streaming/workflow-visualization";
 
 // Extended message type for async workflow tracking
 interface EnhancedMessage extends Message {
@@ -29,6 +29,8 @@ interface EnhancedChatState extends Omit<ChatState, "messages"> {
 }
 
 export default function EnhancedChatInterface() {
+  const [workflowPlan, setWorkflowPlan] = useState<string[]>([]);
+  const [graphType, setGraphType] = useState<string>("");
   const [chatState, setChatState] = useState<EnhancedChatState>({
     messages: [],
     isLoading: false,
@@ -38,13 +40,47 @@ export default function EnhancedChatInterface() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const jobPollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchWorkflowPlan = async () => {
+      try {
+        const apiBaseUrl =
+          process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+        const response = await fetch(`${apiBaseUrl}/api/workflow/plan`);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch workflow plan: ${response.status}`);
+        }
+
+        const data: { nodes?: string[]; graph_type?: string } =
+          await response.json();
+        if (!isMounted) return;
+
+        setWorkflowPlan(data.nodes ?? []);
+        setGraphType(data.graph_type ?? "");
+      } catch (error) {
+        console.error("Failed to load workflow plan", error);
+      }
+    };
+
+    fetchWorkflowPlan();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
   useEffect(() => {
-    scrollToBottom();
-  }, [chatState.messages]);
+    if (autoScrollEnabled) {
+      scrollToBottom();
+    }
+  }, [chatState.messages, autoScrollEnabled]);
 
   // Clean up polling on unmount
   useEffect(() => {
@@ -273,7 +309,11 @@ Watch the Real-time Updates panel for live agent reasoning and progress updates.
   };
 
   return (
-    <div className="flex flex-col h-full max-w-full">
+    <div
+      className="flex flex-col h-full max-w-full"
+      onWheel={() => setAutoScrollEnabled(false)}
+      onTouchStart={() => setAutoScrollEnabled(false)}
+    >
       {/* Chat Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {chatState.messages.length === 0 && (
@@ -293,7 +333,7 @@ Watch the Real-time Updates panel for live agent reasoning and progress updates.
         )}
 
         {chatState.messages.map((message, index) => {
-          // Track which decisionSetIds we've already shown WorkflowContainers for
+          // Track which decisionSetIds have already rendered workflow insights
           const isFirstMessageWithDecisionSetId =
             message.role === "assistant" &&
             message.decisionSetId &&
@@ -340,8 +380,10 @@ Watch the Real-time Updates panel for live agent reasoning and progress updates.
               {/* Show workflow container only for the first assistant message with each decisionSetId */}
               {isFirstMessageWithDecisionSetId && (
                 <div className="ml-4">
-                  <WorkflowContainer
+                  <WorkflowVisualization
                     decisionSetId={message.decisionSetId}
+                    plan={workflowPlan}
+                    graphType={graphType}
                     className="mt-3"
                   />
                 </div>

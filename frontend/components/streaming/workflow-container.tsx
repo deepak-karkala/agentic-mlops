@@ -14,10 +14,12 @@ import {
   ReasonCard,
   WorkflowProgress,
 } from "../../hooks/useStreamingEvents";
+import { getWorkflowNodeLabel } from "../../lib/workflow";
 
 export interface WorkflowContainerProps {
   decisionSetId: string;
   className?: string;
+  streamingState?: ReturnType<typeof useStreamingEvents>;
 }
 
 interface WorkflowStepData {
@@ -33,9 +35,17 @@ interface WorkflowStepData {
 export function WorkflowContainer({
   decisionSetId,
   className = "",
+  streamingState,
 }: WorkflowContainerProps) {
   const [steps, setSteps] = useState<WorkflowStepData[]>([]);
   const [collapsedSteps, setCollapsedSteps] = useState<Set<string>>(new Set());
+
+  const fallbackStreaming = useStreamingEvents({
+    decisionSetId,
+    autoConnect: streamingState ? false : true,
+    reconnectAttempts: 3,
+    reconnectDelay: 2000,
+  });
 
   const {
     isConnected,
@@ -46,12 +56,7 @@ export function WorkflowContainer({
     isWorkflowActive,
     isWorkflowComplete,
     hitlState,
-  } = useStreamingEvents({
-    decisionSetId,
-    autoConnect: true,
-    reconnectAttempts: 3,
-    reconnectDelay: 2000,
-  });
+  } = streamingState ?? fallbackStreaming;
 
   // Process events to build workflow steps
   useEffect(() => {
@@ -61,7 +66,7 @@ export function WorkflowContainer({
     events.forEach((event) => {
       if (event.type === "node-start") {
         const nodeId = event.data.node as string;
-        const stepTitle = getStepTitle(nodeId);
+        const stepTitle = getWorkflowNodeLabel(nodeId);
 
         // Create only the reasoning step (human-readable title)
         processedSteps.set(`${nodeId}-reasoning`, {
@@ -100,7 +105,7 @@ export function WorkflowContainer({
         });
       } else {
         // Create reasoning step from reason card if no node event found
-        const stepTitle = getStepTitle(nodeId);
+        const stepTitle = getWorkflowNodeLabel(nodeId);
         processedSteps.set(reasoningStepId, {
           id: reasoningStepId,
           title: stepTitle,
@@ -134,23 +139,6 @@ export function WorkflowContainer({
       setCollapsedSteps((prev) => new Set([...prev, ...completedSteps]));
     }
   }, [steps]);
-
-  const getStepTitle = (nodeId: string): string => {
-    const titles: Record<string, string> = {
-      intake_extract: "Extracting and structuring project requirements",
-      coverage_check: "Checking requirement coverage and gaps",
-      adaptive_questions: "Generating targeted follow-up questions",
-      planner: "Analyzing requirements and designing MLOps architecture",
-      critic_tech: "Performing technical feasibility analysis",
-      critic_cost: "Analyzing costs and budget compliance",
-      policy_eval: "Evaluating architecture against policies",
-      gate_hitl: "Human-in-the-loop review gate",
-      architecture_agent: "Designing system architecture",
-      codegen_agent: "Generating infrastructure code",
-      validation_agent: "Validating generated code",
-    };
-    return titles[nodeId] || `Processing ${nodeId.replace(/_/g, " ")}`;
-  };
 
   const handleStepToggle = (stepId: string) => {
     setCollapsedSteps((prev) => {
