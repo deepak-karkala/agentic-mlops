@@ -30,6 +30,7 @@ from libs.llm_tech_critic_agent import create_llm_tech_critic_agent
 from libs.llm_cost_critic_agent import create_llm_cost_critic_agent
 from libs.llm_policy_engine_agent import create_llm_policy_engine_agent
 from libs.llm_agent_base import is_mock_mode_enabled
+from libs.streaming_service import get_streaming_service
 
 logger = logging.getLogger(__name__)
 
@@ -1355,19 +1356,33 @@ def build_full_graph() -> Pregel:
     graph = StateGraph(MLOpsWorkflowState)
 
     # Add all agent nodes in the order specified in section 21.1
-    graph.add_node("intake_extract", intake_extract_enhanced)  # Use enhanced version for HITL support
-    graph.add_node("coverage_check", coverage_check_enhanced)  # Use enhanced version for HITL support
-    graph.add_node("adaptive_questions", adaptive_questions)
-    graph.add_node("hitl_gate_input", hitl_gate_user)  # First HITL gate: capture missing inputs
-    graph.add_node("planner", planner)  # Now uses real PlannerAgent
-    graph.add_node("critic_tech", critic_tech)  # Now uses real TechCriticAgent
-    graph.add_node("critic_cost", critic_cost)  # Now uses real CostCriticAgent
-    graph.add_node("policy_eval", policy_eval)  # Now uses real PolicyEngineAgent
-    graph.add_node("hitl_gate_final", gate_hitl)  # Second HITL gate: final approval before codegen
-    graph.add_node("codegen", codegen)
-    graph.add_node("validators", validators)
-    graph.add_node("rationale_compile", rationale_compile)
-    graph.add_node("diff_and_persist", diff_and_persist)
+    graph.add_node(
+        "intake_extract", _wrap_with_streaming_signal("intake_extract", intake_extract_enhanced)
+    )  # Use enhanced version for HITL support
+    graph.add_node(
+        "coverage_check", _wrap_with_streaming_signal("coverage_check", coverage_check_enhanced)
+    )  # Use enhanced version for HITL support
+    graph.add_node(
+        "adaptive_questions", _wrap_with_streaming_signal("adaptive_questions", adaptive_questions)
+    )
+    graph.add_node(
+        "hitl_gate_input", _wrap_with_streaming_signal("hitl_gate_input", hitl_gate_user)
+    )  # First HITL gate: capture missing inputs
+    graph.add_node("planner", _wrap_with_streaming_signal("planner", planner))
+    graph.add_node("critic_tech", _wrap_with_streaming_signal("critic_tech", critic_tech))
+    graph.add_node("critic_cost", _wrap_with_streaming_signal("critic_cost", critic_cost))
+    graph.add_node("policy_eval", _wrap_with_streaming_signal("policy_eval", policy_eval))
+    graph.add_node("hitl_gate_final", _wrap_with_streaming_signal("hitl_gate_final", gate_hitl))
+    graph.add_node("codegen", _wrap_with_streaming_signal("codegen", codegen))
+    graph.add_node("validators", _wrap_with_streaming_signal("validators", validators))
+    graph.add_node(
+        "rationale_compile",
+        _wrap_with_streaming_signal("rationale_compile", rationale_compile),
+    )
+    graph.add_node(
+        "diff_and_persist",
+        _wrap_with_streaming_signal("diff_and_persist", diff_and_persist),
+    )
 
     # Define the execution flow with dual HITL gates
     graph.add_edge(START, "intake_extract")
@@ -1451,11 +1466,13 @@ def build_hitl_graph() -> Pregel:
     graph = StateGraph(MLOpsWorkflowState)
 
     # Add all agent nodes in the order specified in section 21.1
-    graph.add_node("intake_extract", intake_extract)
-    graph.add_node("coverage_check", coverage_check)
-    graph.add_node("adaptive_questions", adaptive_questions)
-    graph.add_node("gate_hitl", gate_hitl)
-    graph.add_node("planner", planner)  # Now uses real PlannerAgent
+    graph.add_node("intake_extract", _wrap_with_streaming_signal("intake_extract", intake_extract))
+    graph.add_node("coverage_check", _wrap_with_streaming_signal("coverage_check", coverage_check))
+    graph.add_node(
+        "adaptive_questions", _wrap_with_streaming_signal("adaptive_questions", adaptive_questions)
+    )
+    graph.add_node("gate_hitl", _wrap_with_streaming_signal("gate_hitl", gate_hitl))
+    graph.add_node("planner", _wrap_with_streaming_signal("planner", planner))
 
     # Define the sequential execution flow with normal edges
     graph.add_edge(START, "intake_extract")
@@ -1508,11 +1525,19 @@ def build_hitl_enhanced_graph() -> Pregel:
     graph = StateGraph(MLOpsWorkflowState)
 
     # Add enhanced node functions
-    graph.add_node("intake_extract", intake_extract_enhanced)
-    graph.add_node("coverage_check", coverage_check_enhanced)
-    graph.add_node("adaptive_questions", adaptive_questions)
-    graph.add_node("hitl_gate_user", hitl_gate_user)
-    graph.add_node("planner", planner)
+    graph.add_node(
+        "intake_extract", _wrap_with_streaming_signal("intake_extract", intake_extract_enhanced)
+    )
+    graph.add_node(
+        "coverage_check", _wrap_with_streaming_signal("coverage_check", coverage_check_enhanced)
+    )
+    graph.add_node(
+        "adaptive_questions", _wrap_with_streaming_signal("adaptive_questions", adaptive_questions)
+    )
+    graph.add_node(
+        "hitl_gate_user", _wrap_with_streaming_signal("hitl_gate_user", hitl_gate_user)
+    )
+    graph.add_node("planner", _wrap_with_streaming_signal("planner", planner))
 
     # Define the flow with conditional routing
     graph.add_edge(START, "intake_extract")
@@ -2077,8 +2102,10 @@ def build_streaming_test_graph() -> Pregel:
         }
 
     # Add two nodes for quick streaming/codegen validation
-    graph.add_node("intake_extract", intake_with_codegen_prep)
-    graph.add_node("codegen", codegen)
+    graph.add_node(
+        "intake_extract", _wrap_with_streaming_signal("intake_extract", intake_with_codegen_prep)
+    )
+    graph.add_node("codegen", _wrap_with_streaming_signal("codegen", codegen))
 
     # Sequential flow with two agents
     graph.add_edge(START, "intake_extract")
@@ -2115,7 +2142,7 @@ def build_thin_graph() -> Pregel:
     graph = StateGraph(MessagesState)
 
     # Add the single processing node
-    graph.add_node("call_llm", call_llm)
+    graph.add_node("call_llm", _wrap_with_streaming_signal("call_llm", call_llm))
 
     # Define the execution flow: START -> call_llm -> END
     graph.add_edge(START, "call_llm")
@@ -2134,3 +2161,36 @@ def build_thin_graph() -> Pregel:
     else:
         # No checkpointer available - compile without persistence
         return graph.compile()
+def _emit_node_start(node_name: str, state: MLOpsWorkflowState) -> None:
+    """Emit a node start event before running the heavy agent work."""
+
+    decision_set_id = state.get("decision_set_id") or state.get("project_id")
+    if not decision_set_id:
+        # Without a decision set we skip emitting to avoid mismatched stream ids
+        return
+
+    streaming_service = get_streaming_service()
+    if streaming_service and decision_set_id:
+        try:
+            _safe_async_run(
+                streaming_service.emit_node_start(
+                    decision_set_id,
+                    node_name,
+                    f"Starting {node_name}",
+                )
+            )
+        except Exception as exc:
+            logger.debug(
+                "Failed to emit node start event",
+                extra={"node": node_name, "decision_set_id": decision_set_id, "error": str(exc)},
+            )
+
+
+def _wrap_with_streaming_signal(node_name: str, func):
+    """Wrap node function to emit streaming start signal before execution."""
+
+    def wrapper(state: MLOpsWorkflowState):
+        _emit_node_start(node_name, state)
+        return func(state)
+
+    return wrapper

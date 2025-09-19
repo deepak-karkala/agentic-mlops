@@ -941,11 +941,6 @@ class IntegratedWorkerService:
             for node_name, node_update in chunk.items():
                 logger.info(f"Node update: {node_name} -> {node_update}")
 
-                # Emit node start event
-                await streaming_service.emit_node_start(
-                    decision_set_id, node_name, f"Starting {node_name}"
-                )
-
                 # Look for reason cards in the node state
                 if hasattr(node_update, "reason_cards") and node_update.reason_cards:
                     # Deduplicate reason cards based on content

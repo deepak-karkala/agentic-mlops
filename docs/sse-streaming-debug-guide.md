@@ -46,6 +46,13 @@ more resilient:
 With the time-based loop in place, the frontend’s EventSource no longer sees
 early 404s, and streaming resumes immediately once the worker emits events.
 
+In addition, each graph node now emits its `node-start` event from within the
+node wrapper itself (instead of relying on the streaming worker). This change
+ensures start signals fire the moment an agent begins—which makes the UI’s
+“running” indicator accurate—and prevents cases where a start event might be
+dispatched with an `unknown` decision-set ID that later caused downstream
+`StreamEventType.ERROR` entries in the logs.
+
 ### Relevant Code Changes
 
 - `api/main.py` — `get_workflow_plan` and `stream_workflow_progress` now share

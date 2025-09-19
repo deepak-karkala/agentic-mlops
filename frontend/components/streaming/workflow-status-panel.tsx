@@ -30,7 +30,7 @@ const STATUS_STYLES: Record<TimelineStatus, { circle: string; badge: string; lab
     label: "Completed",
   },
   running: {
-    circle: "bg-yellow-400 border-yellow-500 animate-pulse",
+    circle: "bg-yellow-400 border-yellow-500",
     badge: "bg-amber-100 text-amber-700",
     label: "In Progress",
   },
@@ -129,23 +129,33 @@ export function WorkflowStatusPanel({
                 const metadata = STATUS_STYLES[node.status];
                 const label = getWorkflowNodeLabel(node.id);
                 const description = getWorkflowNodeDescription(node.id);
+                const isRunning = node.status === "running";
+
+                const icon = node.status === "completed"
+                  ? <CheckCircle2 className="h-3.5 w-3.5" />
+                  : node.status === "running"
+                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    : <Clock3 className="h-3.5 w-3.5" />;
 
                 return (
                   <div key={node.id} className="pl-8 relative">
-                    <span
-                      className={cn(
-                        "absolute left-0 top-1.5 h-5 w-5 rounded-full border-2 flex items-center justify-center text-white",
-                        metadata.circle,
+                    <div className="absolute left-0 top-1.5 h-5 w-5">
+                      {isRunning && (
+                        <span
+                          className="absolute inset-0 rounded-full border-2 border-amber-300/70 animate-ping"
+                          aria-hidden
+                        />
                       )}
-                    >
-                      {node.status === "completed" ? (
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                      ) : node.status === "running" ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Clock3 className="h-3.5 w-3.5" />
-                      )}
-                    </span>
+                      <span
+                        className={cn(
+                          "relative z-10 h-5 w-5 rounded-full border-2 flex items-center justify-center text-white",
+                          metadata.circle,
+                          isRunning && "shadow-[0_0_0_4px_rgba(253,224,71,0.25)]",
+                        )}
+                      >
+                        {icon}
+                      </span>
+                    </div>
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <p className="text-sm font-medium text-foreground">
