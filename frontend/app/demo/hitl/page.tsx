@@ -51,7 +51,7 @@ const demoQuestions: Question[] = [
   }
 ];
 
-const demoSmartDefaults = {
+const demoSmartDefaults: Record<string, string> = {
   "demo_q1_budget": "Growth budget ($500-1500/month)",
   "demo_q2_scale": "Moderate usage (1,000-10,000 requests/day)",
   "demo_q3_compliance": "false"
@@ -60,13 +60,13 @@ const demoSmartDefaults = {
 export default function HITLDemoPage() {
   const [demoState, setDemoState] = useState<"idle" | "questions" | "completed">("idle");
   const [responses, setResponses] = useState<Record<string, string>>({});
-  const [approvalMethod, setApprovalMethod] = useState<"user" | "auto" | "defaults">("");
+  const [approvalMethod, setApprovalMethod] = useState<"user" | "auto" | "defaults">("defaults");
   const [timeoutSeconds, setTimeoutSeconds] = useState(8);
 
   const startDemo = () => {
     setDemoState("questions");
     setResponses({});
-    setApprovalMethod("");
+    setApprovalMethod("defaults");
   };
 
   const handleSubmit = (userResponses: Record<string, string>) => {
@@ -84,7 +84,7 @@ export default function HITLDemoPage() {
   const resetDemo = () => {
     setDemoState("idle");
     setResponses({});
-    setApprovalMethod("");
+    setApprovalMethod("defaults");
   };
 
   return (
@@ -159,10 +159,10 @@ export default function HITLDemoPage() {
                   Ready to Start Demo
                 </h3>
                 <p className="text-gray-600 mb-6">
-                  Click "Start HITL Demo" to see the enhanced Human-in-the-Loop functionality in action.
+                  Click &quot;Start HITL Demo&quot; to see the enhanced Human-in-the-Loop functionality in action.
                 </p>
                 <div className="bg-blue-50 p-4 rounded-lg text-left max-w-md mx-auto">
-                  <h4 className="font-medium text-blue-900 mb-2">What you'll see:</h4>
+                  <h4 className="font-medium text-blue-900 mb-2">What you&apos;ll see:</h4>
                   <ul className="text-sm text-blue-800 space-y-1">
                     <li>• 3 adaptive questions with smart defaults</li>
                     <li>• Real-time countdown timer</li>

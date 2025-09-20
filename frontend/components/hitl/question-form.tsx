@@ -8,7 +8,7 @@
  * - Support for different question types (choice, text, boolean, numeric)
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { CheckCircle, Clock, AlertCircle } from "lucide-react";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
@@ -44,18 +44,28 @@ export function QuestionForm({
   const [isSubmitted, setIsSubmitted] = useState(false);
 
   // Countdown timer
+  const handleAutoApprove = useCallback(() => {
+    if (isSubmitted) return;
+    setIsSubmitted(true);
+    onAutoApprove();
+  }, [isSubmitted, onAutoApprove]);
+
   useEffect(() => {
+    if (isSubmitted) {
+      return;
+    }
+
     if (remainingTime <= 0) {
       handleAutoApprove();
       return;
     }
 
     const timer = setTimeout(() => {
-      setRemainingTime(prev => prev - 1);
+      setRemainingTime((prev) => prev - 1);
     }, 1000);
 
     return () => clearTimeout(timer);
-  }, [remainingTime]);
+  }, [handleAutoApprove, isSubmitted, remainingTime]);
 
   const handleResponseChange = (questionId: string, value: string) => {
     setResponses(prev => ({
@@ -68,12 +78,6 @@ export function QuestionForm({
     if (isSubmitted) return;
     setIsSubmitted(true);
     onSubmit(responses);
-  };
-
-  const handleAutoApprove = () => {
-    if (isSubmitted) return;
-    setIsSubmitted(true);
-    onAutoApprove();
   };
 
   const handleAcceptDefaults = () => {

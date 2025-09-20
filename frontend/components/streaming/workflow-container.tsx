@@ -13,6 +13,7 @@ import {
   useStreamingEvents,
   ReasonCard,
   WorkflowProgress,
+  StreamingState,
 } from "../../hooks/useStreamingEvents";
 import { getWorkflowNodeLabel } from "../../lib/workflow";
 
@@ -20,6 +21,7 @@ export interface WorkflowContainerProps {
   decisionSetId: string;
   className?: string;
   streamingState?: ReturnType<typeof useStreamingEvents>;
+  staticState?: StreamingState;
 }
 
 interface WorkflowStepData {
@@ -36,27 +38,31 @@ export function WorkflowContainer({
   decisionSetId,
   className = "",
   streamingState,
+  staticState,
 }: WorkflowContainerProps) {
   const [steps, setSteps] = useState<WorkflowStepData[]>([]);
   const [collapsedSteps, setCollapsedSteps] = useState<Set<string>>(new Set());
 
   const fallbackStreaming = useStreamingEvents({
     decisionSetId,
-    autoConnect: streamingState ? false : true,
+    autoConnect: streamingState || staticState ? false : true,
     reconnectAttempts: 3,
     reconnectDelay: 2000,
   });
 
-  const {
-    isConnected,
-    events,
-    reasonCards,
-    workflowProgress,
-    error,
-    isWorkflowActive,
-    isWorkflowComplete,
-    hitlState,
-  } = streamingState ?? fallbackStreaming;
+  const activeStreaming = streamingState ?? fallbackStreaming;
+  const state = staticState ?? activeStreaming;
+
+  const isConnected = staticState ? staticState.isConnected : activeStreaming.isConnected;
+  const events = state.events;
+  const reasonCards = state.reasonCards;
+  const workflowProgress = state.workflowProgress;
+  const error = state.error;
+  const hitlState = state.hitlState;
+
+  const workflowStatus = workflowProgress?.status ?? "pending";
+  const isWorkflowActive = workflowStatus === "running";
+  const isWorkflowComplete = workflowStatus === "completed";
 
   // Process events to build workflow steps
   useEffect(() => {
@@ -136,13 +142,15 @@ export function WorkflowContainer({
         .slice(0, -3) // Keep the latest 3 completed steps expanded
         .map((step) => step.id);
 
-      setCollapsedSteps((prev) => new Set([...prev, ...completedSteps]));
+      setCollapsedSteps(
+        (prev) => new Set([...Array.from(prev), ...completedSteps]),
+      );
     }
   }, [steps]);
 
   const handleStepToggle = (stepId: string) => {
     setCollapsedSteps((prev) => {
-      const newSet = new Set(prev);
+      const newSet = new Set(Array.from(prev));
       if (newSet.has(stepId)) {
         newSet.delete(stepId);
       } else {

@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import { fontFamily } from "tailwindcss/defaultTheme";
 
 const config: Config = {
   content: [
@@ -16,6 +17,16 @@ const config: Config = {
     },
     extend: {
       colors: {
+        espresso: "#2e211a",
+        sand: "#f7f0e8",
+        sandDeep: "#ede0d2",
+        sandHover: "#f0e4d9",
+        parchment: "#fdf7f0",
+        accentOrange: "#e66b3d",
+        accentOrangeLight: "rgba(230, 107, 61, 0.12)",
+        sage: "#d5e2d0",
+        dustyRose: "#f1d8d0",
+        warmGray: "#b7a299",
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
@@ -50,7 +61,21 @@ const config: Config = {
           foreground: "hsl(var(--card-foreground))",
         },
       },
+      fontFamily: {
+        sans: ["var(--font-inter)", ...fontFamily.sans],
+        serif: ["var(--font-newsreader)", ...fontFamily.serif],
+        display: ["var(--font-newsreader)", ...fontFamily.serif],
+      },
+      boxShadow: {
+        "claude-card": "0 20px 45px -25px rgba(49, 33, 20, 0.35)",
+        "claude-soft": "0 16px 30px -24px rgba(49, 33, 20, 0.45)",
+      },
+      backgroundImage: {
+        "claude-fade":
+          "radial-gradient(circle at 20% 20%, rgba(230,107,61,0.12), transparent 55%), radial-gradient(circle at 80% 10%, rgba(213,226,208,0.16), transparent 60%)",
+      },
       borderRadius: {
+        xl: "1.75rem",
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",

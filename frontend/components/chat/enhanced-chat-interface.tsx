@@ -7,28 +7,27 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Send, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Send, Loader2, AlertCircle, Paperclip } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
-import { Message, ChatState } from "../../types/chat";
 import { WorkflowVisualization } from "../streaming/workflow-visualization";
+import { EnhancedChatState, EnhancedMessage } from "@/types/enhanced-chat";
+import { LandingThemeConfig } from "@/data/landing-themes";
+import { cn } from "@/lib/utils";
 
-// Extended message type for async workflow tracking
-interface EnhancedMessage extends Message {
-  decisionSetId?: string;
-  jobId?: string;
-  jobStatus?: string;
-  isStreamingActive?: boolean;
+interface EnhancedChatInterfaceProps {
+  pendingPrompt?: string | null;
+  onPromptConsumed?: () => void;
+  theme: LandingThemeConfig;
 }
 
-interface EnhancedChatState extends Omit<ChatState, "messages"> {
-  messages: EnhancedMessage[];
-  currentDecisionSetId?: string;
-}
-
-export default function EnhancedChatInterface() {
+export default function EnhancedChatInterface({
+  pendingPrompt,
+  onPromptConsumed,
+  theme,
+}: EnhancedChatInterfaceProps) {
+  const isDark = theme.id === "midnight";
   const [workflowPlan, setWorkflowPlan] = useState<string[]>([]);
   const [graphType, setGraphType] = useState<string>("");
   const [chatState, setChatState] = useState<EnhancedChatState>({
@@ -91,6 +90,14 @@ export default function EnhancedChatInterface() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (pendingPrompt && pendingPrompt.trim()) {
+      handleSendMessage(pendingPrompt);
+      onPromptConsumed?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingPrompt, onPromptConsumed]);
 
   // Poll job status
   const pollJobStatus = async (jobId: string, decisionSetId: string) => {
@@ -310,23 +317,19 @@ Watch the Real-time Updates panel for live agent reasoning and progress updates.
 
   return (
     <div
-      className="flex flex-col h-full max-w-full"
+      className="flex h-full max-w-full flex-col"
       onWheel={() => setAutoScrollEnabled(false)}
       onTouchStart={() => setAutoScrollEnabled(false)}
     >
       {/* Chat Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 space-y-4 overflow-y-auto p-6">
         {chatState.messages.length === 0 && (
-          <div className="flex items-center justify-center h-full text-center">
-            <div className="space-y-2">
-              <h2 className="text-2xl font-semibold text-muted-foreground">
-                Welcome to Agentic MLOps
-              </h2>
-              <p className="text-muted-foreground">
-                Start a conversation to design your MLOps infrastructure
-              </p>
-              <p className="text-sm text-muted-foreground">
-                Watch real-time agent reasoning and progress updates below
+          <div className="flex h-full items-center justify-center text-center">
+            <div className={cn(theme.chat.emptyState, "max-w-md text-left")}
+            >
+              <h2 className="font-display text-xl text-espresso">Welcome to Agentic MLOps</h2>
+              <p className="text-sm leading-relaxed text-espresso/70">
+                Ask for an architecture blueprint or paste requirements to watch our agents collaborate in real time. Attach context or guardrails below before you send.
               </p>
             </div>
           </div>
@@ -344,44 +347,49 @@ Watch the Real-time Updates panel for live agent reasoning and progress updates.
           return (
             <div key={message.id} className="space-y-2">
               <div
-                className={`flex ${
-                  message.role === "user" ? "justify-end" : "justify-start"
-                }`}
+                className={cn(
+                  "flex",
+                  message.role === "user" ? "justify-end" : "justify-start",
+                )}
               >
-                <Card
-                  className={`max-w-[80%] p-4 ${
+                <div
+                  className={cn(
+                    "max-w-[78%] rounded-[1.75rem] px-5 py-4 leading-relaxed shadow-sm",
                     message.role === "user"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted"
-                  }`}
+                      ? cn(theme.chat.userBubble, "text-sm text-espresso")
+                      : cn(
+                          theme.chat.assistantBubble,
+                          "text-sm text-espresso/80",
+                        ),
+                  )}
                 >
                   <p className="whitespace-pre-wrap break-words">
                     {message.content}
                   </p>
-                  <div className="flex items-center justify-between mt-2">
-                    <span className="text-xs opacity-60">
+                  <div className="mt-3 flex items-center justify-between text-[0.7rem] uppercase tracking-[0.2em] text-espresso/45">
+                    <span>
                       {message.timestamp.toLocaleTimeString()}
                     </span>
                     {message.jobStatus && (
                       <Badge
                         variant={getJobStatusBadge(message.jobStatus).variant}
-                        className="text-xs"
+                        className="flex items-center gap-1 rounded-full border-espresso/20 bg-white/80 px-3 py-1 text-[0.62rem] font-semibold uppercase tracking-[0.2em]"
                       >
                         {message.isStreamingActive && (
-                          <div className="w-2 h-2 bg-current rounded-full animate-pulse mr-1" />
+                          <span className="h-2 w-2 rounded-full bg-current animate-pulse" />
                         )}
                         {getJobStatusBadge(message.jobStatus).text}
                       </Badge>
                     )}
                   </div>
-                </Card>
+                </div>
               </div>
 
               {/* Show workflow container only for the first assistant message with each decisionSetId */}
               {isFirstMessageWithDecisionSetId && (
                 <div className="ml-4">
                   <WorkflowVisualization
-                    decisionSetId={message.decisionSetId}
+                    decisionSetId={message.decisionSetId!}
                     plan={workflowPlan}
                     graphType={graphType}
                     className="mt-3"
@@ -394,23 +402,19 @@ Watch the Real-time Updates panel for live agent reasoning and progress updates.
 
         {chatState.isLoading && (
           <div className="flex justify-start">
-            <Card className="bg-muted p-4 flex items-center space-x-2">
+            <div className={cn("flex items-center gap-3 rounded-2xl px-5 py-3", theme.chat.loader)}>
               <Loader2 className="h-4 w-4 animate-spin" />
-              <span className="text-sm text-muted-foreground">
-                Processing workflow...
-              </span>
-            </Card>
+              <span className="text-sm text-espresso/60">Processing workflow...</span>
+            </div>
           </div>
         )}
 
         {chatState.error && (
           <div className="flex justify-center">
-            <Card className="bg-destructive/10 border-destructive/20 p-4">
-              <div className="flex items-center space-x-2">
-                <AlertCircle className="h-4 w-4 text-destructive" />
-                <p className="text-destructive text-sm">{chatState.error}</p>
-              </div>
-            </Card>
+            <div className="flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50/80 px-4 py-3 text-sm text-red-600">
+              <AlertCircle className="h-4 w-4" />
+              <p>{chatState.error}</p>
+            </div>
           </div>
         )}
 
@@ -418,20 +422,29 @@ Watch the Real-time Updates panel for live agent reasoning and progress updates.
       </div>
 
       {/* Input Form */}
-      <div className="border-t bg-background p-4">
-        <form onSubmit={handleSubmit} className="flex space-x-2">
+      <div className="border-t border-espresso/10 bg-white/80 p-5">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 rounded-full border border-espresso/15 bg-sand/80 px-4 py-2 text-xs text-espresso/60">
+              <Paperclip className="h-4 w-4" />
+              Add context or guardrails (drag & drop coming soon)
+            </div>
+          </div>
           <Input
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyPress={handleKeyPress}
             placeholder="Describe your MLOps requirements..."
             disabled={chatState.isLoading}
-            className="flex-1"
+            className={cn(
+              "flex-1 rounded-[1.75rem] border border-espresso/12 bg-white/90 px-5 py-5 text-sm text-espresso shadow-sm placeholder:text-espresso/40 focus-visible:ring-2 focus-visible:ring-accentOrange/60",
+            )}
           />
           <Button
             type="submit"
+            variant="accent"
             disabled={!inputValue.trim() || chatState.isLoading}
-            size="icon"
+            className="flex w-full items-center justify-center gap-2 rounded-full px-6 py-4 text-sm font-semibold transition hover:-translate-y-0.5"
           >
             {chatState.isLoading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -440,8 +453,8 @@ Watch the Real-time Updates panel for live agent reasoning and progress updates.
             )}
           </Button>
         </form>
-        <p className="text-xs text-muted-foreground mt-2">
-          Real-time agent reasoning will appear above during workflow execution
+        <p className="mt-3 text-xs uppercase tracking-[0.28em] text-espresso/40">
+          Track nodes, reason cards, and streaming status in the workflow timeline above.
         </p>
       </div>
     </div>

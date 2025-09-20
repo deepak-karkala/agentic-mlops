@@ -1,6 +1,9 @@
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
-import { useStreamingEvents } from "@/hooks/useStreamingEvents";
+import {
+  useStreamingEvents,
+  StreamingState,
+} from "@/hooks/useStreamingEvents";
 import { WorkflowContainer } from "./workflow-container";
 import {
   TimelineNode,
@@ -12,6 +15,7 @@ interface WorkflowVisualizationProps {
   plan: string[];
   graphType?: string;
   className?: string;
+  staticState?: StreamingState;
 }
 
 function uniqueSequence(values: Array<string | undefined | null>): string[] {
@@ -32,13 +36,16 @@ export function WorkflowVisualization({
   plan,
   graphType,
   className,
+  staticState,
 }: WorkflowVisualizationProps) {
   const streaming = useStreamingEvents({
-    decisionSetId,
-    autoConnect: true,
-    reconnectAttempts: 5,
+    decisionSetId: staticState ? undefined : decisionSetId,
+    autoConnect: !staticState,
+    reconnectAttempts: staticState ? 0 : 5,
     reconnectDelay: 2500,
   });
+
+  const state = staticState ?? streaming;
 
   const {
     events,
@@ -47,7 +54,7 @@ export function WorkflowVisualization({
     isConnected,
     isConnecting,
     connectionError,
-  } = streaming;
+  } = state;
 
   const basePlan = useMemo(() => uniqueSequence(plan), [plan]);
 
@@ -123,7 +130,8 @@ export function WorkflowVisualization({
         <WorkflowContainer
           decisionSetId={decisionSetId}
           className="h-full"
-          streamingState={streaming}
+          streamingState={staticState ? undefined : streaming}
+          staticState={staticState}
         />
       </div>
     </div>
