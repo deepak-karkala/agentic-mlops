@@ -71,10 +71,10 @@ export const LANDING_THEMES: Record<LandingThemeId, LandingThemeConfig> = {
     id: "claude",
     label: "Claude",
     pageBackground:
-      "relative min-h-screen bg-sand bg-claude-fade",
+      "relative min-h-screen bg-sand bg-claude-fade-enhanced",
     hero: {
       base:
-        "border border-espresso/10 bg-parchment text-espresso shadow-claude-soft",
+        "border border-espresso/10 bg-parchment/95 text-espresso shadow-elevated",
       badge:
         "inline-flex items-center gap-2 rounded-full border border-espresso/10 bg-accentOrangeLight px-4 py-1 text-[0.68rem] font-semibold tracking-[0.28em] uppercase text-espresso",
       heading:
@@ -88,7 +88,7 @@ export const LANDING_THEMES: Record<LandingThemeId, LandingThemeConfig> = {
       statsLabel: "text-xs uppercase tracking-[0.28em] text-espresso/60",
       statsValue: "mt-1 text-lg font-semibold text-espresso",
       cardWrapper:
-        "w-full max-w-sm rounded-[1.5rem] border border-espresso/10 bg-white/90 p-6 shadow-claude-card",
+        "w-full max-w-sm rounded-[1.5rem] border border-espresso/10 bg-white/95 p-6 shadow-floating",
       cardTitle:
         "text-[0.7rem] font-semibold uppercase tracking-[0.35em] text-espresso/70",
       reasonList: "space-y-3 text-sm text-espresso/80",
@@ -114,7 +114,7 @@ export const LANDING_THEMES: Record<LandingThemeId, LandingThemeConfig> = {
     },
     templateCard: {
       wrapper:
-        "border border-espresso/12 bg-white/90 text-espresso shadow-sm transition hover:-translate-y-1 hover:border-espresso/20 hover:shadow-claude-soft",
+        "border border-espresso/12 bg-white/95 text-espresso shadow-floating backdrop-blur-sm transition-all duration-300 hover:-translate-y-3 hover:border-espresso/20 hover:shadow-super-elevated",
       tag: "border border-espresso/20 bg-sand/70 text-espresso/80",
       title: "font-display text-xl text-espresso",
       subtitle: "text-[0.95rem] leading-relaxed text-espresso/70",
@@ -126,7 +126,7 @@ export const LANDING_THEMES: Record<LandingThemeId, LandingThemeConfig> = {
       ],
       techBadge: "border border-espresso/15 bg-white/70 text-espresso/70",
       statsBar:
-        "rounded-2xl border border-espresso/10 bg-sand/80 px-4 py-3 text-espresso/70",
+        "rounded-xl border border-espresso/10 bg-sand/80 px-3 py-2 text-espresso/70",
       statsLabel: "text-[0.6rem] uppercase tracking-[0.32em] text-espresso/50",
       statsValue: "text-sm font-semibold text-espresso",
       text: "text-espresso/75",
@@ -136,7 +136,7 @@ export const LANDING_THEMES: Record<LandingThemeId, LandingThemeConfig> = {
     },
     chat: {
       wrapper:
-        "rounded-[2.25rem] border border-espresso/12 bg-white/92 shadow-claude-card",
+        "rounded-[2.25rem] border border-espresso/12 bg-white/95 shadow-elevated backdrop-blur-sm",
       emptyState:
         "space-y-2 rounded-2xl border border-espresso/10 bg-sand/80 px-4 py-5 text-espresso/70",
       userBubble:
@@ -207,7 +207,7 @@ export const LANDING_THEMES: Record<LandingThemeId, LandingThemeConfig> = {
     },
     templateCard: {
       wrapper:
-        "border border-white/90 bg-white/98 shadow-[0_30px_80px_-10px_rgba(99,102,241,0.5)] hover:border-indigo-100 hover:shadow-[0_40px_100px_-5px_rgba(129,140,248,0.55)] transition-all duration-300",
+        "border border-white/90 bg-white/98 shadow-floating backdrop-blur-sm hover:border-indigo-100 hover:shadow-super-elevated hover:-translate-y-3 transition-all duration-300",
       tag: "border-indigo-200 bg-indigo-50/80 text-indigo-600",
       title: "font-bold text-slate-900",
       subtitle: "text-slate-700 leading-relaxed",
@@ -218,7 +218,7 @@ export const LANDING_THEMES: Record<LandingThemeId, LandingThemeConfig> = {
         "border border-emerald-100 bg-emerald-50/75",
       ],
       techBadge: "border-indigo-100 bg-white text-indigo-600",
-      statsBar: "rounded-lg border border-indigo-100/70 bg-indigo-50/60 px-3 py-3 text-slate-600",
+      statsBar: "rounded-lg border border-indigo-100/70 bg-indigo-50/60 px-3 py-2 text-slate-600",
       statsLabel: "text-[10px] uppercase tracking-wide text-slate-500",
       statsValue: "text-sm font-semibold text-slate-900",
       text: "text-slate-800",
@@ -228,7 +228,7 @@ export const LANDING_THEMES: Record<LandingThemeId, LandingThemeConfig> = {
     },
     chat: {
       wrapper:
-        "rounded-3xl border border-white/90 bg-white/98 shadow-[0_60px_160px_-20px_rgba(15,23,42,0.35)] shadow-indigo-500/25",
+        "rounded-3xl border border-white/90 bg-white/98 shadow-elevated backdrop-blur-sm",
       emptyState:
         "space-y-2 rounded-xl border border-indigo-100 bg-indigo-50/70 px-4 py-5 text-indigo-700 shadow-sm",
       userBubble:
@@ -294,7 +294,7 @@ export const LANDING_THEMES: Record<LandingThemeId, LandingThemeConfig> = {
     },
     templateCard: {
       wrapper:
-        "border border-slate-700/80 bg-slate-800/80 text-slate-200 shadow-[0_32px_90px_-25px_rgba(14,165,233,0.5)] hover:border-cyan-500/70 hover:shadow-[0_40px_100px_-20px_rgba(56,189,248,0.55)] transition-all duration-300",
+        "border border-slate-700/80 bg-slate-800/80 text-slate-200 shadow-floating backdrop-blur-sm hover:border-cyan-500/70 hover:shadow-super-elevated hover:-translate-y-3 transition-all duration-300",
       tag: "border-cyan-500/50 bg-cyan-500/15 text-cyan-200",
       title: "font-semibold text-white",
       subtitle: "text-slate-300",
@@ -306,7 +306,7 @@ export const LANDING_THEMES: Record<LandingThemeId, LandingThemeConfig> = {
       ],
       techBadge: "border-slate-700 bg-slate-800/70 text-slate-200",
       statsBar:
-        "rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-3 text-slate-300",
+        "rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2 text-slate-300",
       statsLabel: "text-[10px] uppercase tracking-wide text-slate-400",
       statsValue: "text-sm font-semibold text-slate-100",
       text: "text-slate-200",
@@ -316,7 +316,7 @@ export const LANDING_THEMES: Record<LandingThemeId, LandingThemeConfig> = {
     },
     chat: {
       wrapper:
-        "rounded-3xl border border-slate-700/80 bg-slate-800/90 shadow-[0_60px_160px_-50px_rgba(8,47,73,0.95)] shadow-cyan-500/15",
+        "rounded-3xl border border-slate-700/80 bg-slate-800/90 shadow-elevated backdrop-blur-sm",
       emptyState:
         "space-y-2 rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-5 text-slate-200 shadow-sm",
       userBubble:

@@ -296,9 +296,14 @@ class BaseMLOpsAgent(ABC):
         confidence: float = 0.5,
     ) -> ReasonCard:
         """Create a structured reason card for this agent's decision."""
+        # Prefer canonical LangGraph node identifiers ("intake_extract", "critic_tech", ...)
+        node_identifier = self.agent_type.value.replace(".", "_")
+        if not node_identifier:
+            node_identifier = self.name.lower().replace(" ", "_")
+
         return ReasonCard(
             agent=self.agent_type,
-            node_name=self.name.lower().replace(" ", "_"),
+            node_name=node_identifier,
             trigger=trigger,
             inputs=inputs,
             candidates=candidates or [],

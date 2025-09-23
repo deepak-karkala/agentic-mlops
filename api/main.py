@@ -164,6 +164,34 @@ class WorkflowPlanResponse(BaseModel):
     graph_type: str
 
 
+def _canonical_node_id(*candidates: Optional[str]) -> Optional[str]:
+    """Return LangGraph-compatible node identifier from assorted agent names."""
+
+    for candidate in candidates:
+        if candidate is None:
+            continue
+
+        # Unwrap enums (AgentType, etc.)
+        value = getattr(candidate, "value", candidate)
+        if not isinstance(value, str):
+            value = str(value)
+
+        normalized = value.strip()
+        if not normalized:
+            continue
+
+        normalized = normalized.lower()
+        normalized = normalized.replace(" ", "_").replace("-", "_")
+        normalized = normalized.replace(".", "_")
+
+        if normalized.endswith("_agent"):
+            normalized = normalized[: -len("_agent")]
+
+        return normalized
+
+    return None
+
+
 # Select graph based on env flag, with safe fallback
 # Support both legacy USE_FULL_GRAPH and new GRAPH_TYPE environment variables
 USE_FULL_GRAPH = os.getenv("USE_FULL_GRAPH", "false").lower() in {"1", "true", "yes"}
@@ -972,7 +1000,24 @@ class IntegratedWorkerService:
                         )
                         if hasattr(reason_card, "model_dump"):  # Pydantic model
                             # Emit reason card directly via streaming service
-                            await streaming_service.emit_reason_card(reason_card)
+                            normalized_node = _canonical_node_id(
+                                getattr(reason_card, "node", None),
+                                getattr(reason_card, "node_name", None),
+                                getattr(reason_card, "agent", None),
+                                node_name,
+                            )
+
+                            card_to_emit = reason_card
+                            if normalized_node and getattr(reason_card, "node", None) != normalized_node:
+                                try:
+                                    card_to_emit = reason_card.model_copy(
+                                        update={"node": normalized_node}
+                                    )
+                                except Exception:
+                                    # Fall back to original card if model_copy fails
+                                    card_to_emit = reason_card
+
+                            await streaming_service.emit_reason_card(card_to_emit)
                         elif isinstance(
                             reason_card, dict
                         ):  # Dictionary-based reason card
@@ -988,11 +1033,12 @@ class IntegratedWorkerService:
 
                             try:
                                 reason_card_obj = ReasonCard.model_validate(reason_card)
-                                normalized_node = (
-                                    reason_card_obj.node
-                                    or reason_card.get("node")
-                                    or reason_card.get("node_name")
-                                    or node_name
+                                normalized_node = _canonical_node_id(
+                                    reason_card_obj.node,
+                                    reason_card.get("node"),
+                                    reason_card.get("node_name"),
+                                    reason_card.get("agent"),
+                                    node_name,
                                 )
                                 if reason_card_obj.decision_set_id in (
                                     None,
@@ -1011,16 +1057,17 @@ class IntegratedWorkerService:
                                     "Reason card dict validation failed: %s",
                                     validation_error,
                                 )
-                                normalized_node = (
-                                    reason_card.get("node")
-                                    or reason_card.get("node_name")
-                                    or node_name
+                                normalized_node = _canonical_node_id(
+                                    reason_card.get("node"),
+                                    reason_card.get("node_name"),
+                                    reason_card.get("agent"),
+                                    node_name,
                                 )
                                 reason_card_obj = create_reason_card(
                                     agent=reason_card.get(
                                         "agent", normalized_node or "unknown"
                                     ),
-                                    node=normalized_node,
+                                    node=normalized_node or node_name,
                                     decision_set_id=reason_card.get(
                                         "decision_set_id", decision_set_id
                                     ),
@@ -1092,9 +1139,14 @@ class IntegratedWorkerService:
             # Create a hash key based on the card's content
             if hasattr(card, "model_dump"):  # Pydantic model
                 # Use key fields to create a unique identifier
+                normalized_node = _canonical_node_id(
+                    getattr(card, "node", None),
+                    getattr(card, "node_name", None),
+                    getattr(card, "agent", None),
+                )
                 key = (
                     card.agent,
-                    card.node_name,
+                    normalized_node,
                     card.trigger,
                     str(card.inputs),
                     str(card.outputs),
@@ -1102,9 +1154,14 @@ class IntegratedWorkerService:
                 )
             elif isinstance(card, dict):  # Dictionary-based reason card
                 # Use key fields to create a unique identifier
+                normalized_node = _canonical_node_id(
+                    card.get("node"),
+                    card.get("node_name"),
+                    card.get("agent"),
+                )
                 key = (
                     card.get("agent", ""),
-                    card.get("node_name", ""),
+                    normalized_node,
                     card.get("trigger", ""),
                     str(card.get("inputs", {})),
                     str(card.get("outputs", {})),

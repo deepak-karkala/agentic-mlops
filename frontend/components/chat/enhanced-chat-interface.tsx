@@ -38,11 +38,12 @@ export default function EnhancedChatInterface({
   const [inputValue, setInputValue] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const jobPollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const planRetryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     let isMounted = true;
 
-    const fetchWorkflowPlan = async () => {
+    const fetchWorkflowPlan = async (attempt = 0) => {
       try {
         const apiBaseUrl =
           process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
@@ -57,8 +58,23 @@ export default function EnhancedChatInterface({
 
         setWorkflowPlan(data.nodes ?? []);
         setGraphType(data.graph_type ?? "");
+
+        if (planRetryTimeoutRef.current) {
+          clearTimeout(planRetryTimeoutRef.current);
+          planRetryTimeoutRef.current = null;
+        }
       } catch (error) {
         console.error("Failed to load workflow plan", error);
+
+        if (!isMounted) return;
+
+        if (attempt < 3) {
+          const delay = Math.min(4000, 1000 * (attempt + 1));
+          planRetryTimeoutRef.current = setTimeout(
+            () => fetchWorkflowPlan(attempt + 1),
+            delay,
+          );
+        }
       }
     };
 
@@ -66,6 +82,10 @@ export default function EnhancedChatInterface({
 
     return () => {
       isMounted = false;
+      if (planRetryTimeoutRef.current) {
+        clearTimeout(planRetryTimeoutRef.current);
+        planRetryTimeoutRef.current = null;
+      }
     };
   }, []);
 

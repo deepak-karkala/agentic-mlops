@@ -69,10 +69,17 @@ const config: Config = {
       boxShadow: {
         "claude-card": "0 20px 45px -25px rgba(49, 33, 20, 0.35)",
         "claude-soft": "0 16px 30px -24px rgba(49, 33, 20, 0.45)",
+        "elevated": "0 32px 64px -12px rgba(49, 33, 20, 0.4), 0 16px 32px -8px rgba(49, 33, 20, 0.15), 0 0 0 1px rgba(255, 255, 255, 0.1)",
+        "floating": "0 24px 48px -12px rgba(49, 33, 20, 0.35), 0 12px 24px -6px rgba(49, 33, 20, 0.12), 0 0 0 1px rgba(255, 255, 255, 0.08)",
+        "hover-lift": "0 40px 80px -12px rgba(49, 33, 20, 0.5), 0 20px 40px -8px rgba(49, 33, 20, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.15)",
+        "super-elevated": "0 50px 100px -10px rgba(49, 33, 20, 0.6), 0 25px 50px -5px rgba(49, 33, 20, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.2)",
+        "glass": "0 20px 40px -8px rgba(49, 33, 20, 0.3), 0 8px 16px -4px rgba(49, 33, 20, 0.1), inset 0 1px 0 0 rgba(255, 255, 255, 0.1)",
       },
       backgroundImage: {
         "claude-fade":
           "radial-gradient(circle at 20% 20%, rgba(230,107,61,0.12), transparent 55%), radial-gradient(circle at 80% 10%, rgba(213,226,208,0.16), transparent 60%)",
+        "claude-fade-enhanced":
+          "radial-gradient(circle at 20% 20%, rgba(230,107,61,0.15), transparent 50%), radial-gradient(circle at 80% 10%, rgba(213,226,208,0.2), transparent 55%), radial-gradient(circle at 50% 90%, rgba(49,33,20,0.03), transparent 70%)",
       },
       borderRadius: {
         xl: "1.75rem",

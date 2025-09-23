@@ -26,6 +26,33 @@ from libs.streaming_service import get_streaming_service
 load_dotenv()
 
 
+def _canonical_node_id(*candidates):
+    """Normalize assorted agent/node labels to LangGraph node identifiers."""
+
+    for candidate in candidates:
+        if candidate is None:
+            continue
+
+        value = getattr(candidate, "value", candidate)
+        if not isinstance(value, str):
+            value = str(value)
+
+        normalized = value.strip()
+        if not normalized:
+            continue
+
+        normalized = normalized.lower()
+        normalized = normalized.replace(" ", "_").replace("-", "_")
+        normalized = normalized.replace(".", "_")
+
+        if normalized.endswith("_agent"):
+            normalized = normalized[: -len("_agent")]
+
+        return normalized
+
+    return None
+
+
 class WorkerStreamingClient:
     """HTTP client for worker to emit streaming events to API server."""
 
@@ -390,9 +417,20 @@ class WorkerService:
                         )
                         if hasattr(reason_card, "model_dump"):  # Pydantic model
                             # Emit reason card via HTTP API
+                            normalized_node = _canonical_node_id(
+                                getattr(reason_card, "node", None),
+                                getattr(reason_card, "node_name", None),
+                                getattr(reason_card, "agent", None),
+                                node_name,
+                            )
+                            agent_identifier = getattr(reason_card, "agent", "unknown")
+                            agent_identifier = getattr(agent_identifier, "value", agent_identifier)
+                            node_identifier = normalized_node or getattr(
+                                reason_card, "node", node_name
+                            )
                             await streaming_client.emit_reason_card(
-                                agent=reason_card.agent,
-                                node=reason_card.node,
+                                agent=agent_identifier,
+                                node=node_identifier,
                                 reasoning=reason_card.reasoning,
                                 decision=reason_card.decision,
                                 category=reason_card.category,
@@ -413,11 +451,12 @@ class WorkerService:
 
                             try:
                                 reason_card_obj = ReasonCard.model_validate(reason_card)
-                                normalized_node = (
-                                    reason_card_obj.node
-                                    or reason_card.get("node")
-                                    or reason_card.get("node_name")
-                                    or node_name
+                                normalized_node = _canonical_node_id(
+                                    reason_card_obj.node,
+                                    reason_card.get("node"),
+                                    reason_card.get("node_name"),
+                                    reason_card.get("agent"),
+                                    node_name,
                                 )
                                 if reason_card_obj.decision_set_id in (
                                     None,
@@ -436,16 +475,17 @@ class WorkerService:
                                     "Reason card dict validation failed: %s",
                                     validation_error,
                                 )
-                                normalized_node = (
-                                    reason_card.get("node")
-                                    or reason_card.get("node_name")
-                                    or node_name
+                                normalized_node = _canonical_node_id(
+                                    reason_card.get("node"),
+                                    reason_card.get("node_name"),
+                                    reason_card.get("agent"),
+                                    node_name,
                                 )
                                 reason_card_obj = ReasonCard(
                                     agent=reason_card.get(
                                         "agent", normalized_node or "unknown"
                                     ),
-                                    node=normalized_node,
+                                    node=normalized_node or node_name,
                                     decision_set_id=reason_card.get(
                                         "decision_set_id", decision_set_id
                                     ),
@@ -482,7 +522,11 @@ class WorkerService:
 
                             await streaming_client.emit_reason_card(
                                 agent=reason_card_obj.agent,
-                                node=reason_card_obj.node,
+                                node=_canonical_node_id(
+                                    reason_card_obj.node,
+                                    reason_card_obj.agent,
+                                    node_name,
+                                ),
                                 reasoning=reason_card_obj.reasoning,
                                 decision=reason_card_obj.decision,
                                 category=reason_card_obj.category,
