@@ -101,6 +101,30 @@ class StreamingService:
         )
         await self.emit_event(event)
 
+    async def emit_workflow_start(
+        self, decision_set_id: str, message: Optional[str] = None
+    ) -> None:
+        """Emit a workflow start event."""
+        event = StreamEvent(
+            event_type=StreamEventType.WORKFLOW_START,
+            decision_set_id=decision_set_id,
+            data={},
+            message=message or "Workflow started",
+        )
+        await self.emit_event(event)
+
+    async def emit_workflow_complete(
+        self, decision_set_id: str, message: Optional[str] = None
+    ) -> None:
+        """Emit a workflow completion event."""
+        event = StreamEvent(
+            event_type=StreamEventType.WORKFLOW_COMPLETE,
+            decision_set_id=decision_set_id,
+            data={},
+            message=message or "Workflow completed",
+        )
+        await self.emit_event(event)
+
     async def emit_error(
         self, decision_set_id: str, error_message: str, node_name: Optional[str] = None
     ) -> None:
@@ -217,13 +241,14 @@ class StreamingService:
         await self.emit_event(event)
 
     async def subscribe(
-        self, decision_set_id: str
+        self, decision_set_id: str, replay_history: bool = True
     ) -> AsyncGenerator[StreamEvent, None]:
         """
         Subscribe to streaming events for a decision set.
 
         Args:
             decision_set_id: The decision set ID to subscribe to
+            replay_history: Whether to replay historical events on connect
 
         Yields:
             StreamEvent: Stream events as they occur
@@ -237,22 +262,28 @@ class StreamingService:
         self._connections[decision_set_id].append(connection_queue)
 
         try:
-            # Send historical events first
-            historical_events = self._events.get(decision_set_id, [])
-            logger.info(
-                f"SSE connection for {decision_set_id}: Found {len(historical_events)} historical events, sending last 50"
-            )
-
-            historical_to_send = (
-                historical_events[-50:]
-                if len(historical_events) > 50
-                else historical_events
-            )
-            for i, event in enumerate(historical_to_send):
+            if replay_history:
+                # Send historical events first
+                historical_events = self._events.get(decision_set_id, [])
                 logger.info(
-                    f"SSE sending historical event {i + 1}/{len(historical_to_send)}: {event.event_type} at {event.timestamp}"
+                    f"SSE connection for {decision_set_id}: Found {len(historical_events)} historical events, sending last 50"
                 )
-                yield event
+
+                historical_to_send = (
+                    historical_events[-50:]
+                    if len(historical_events) > 50
+                    else historical_events
+                )
+                for i, event in enumerate(historical_to_send):
+                    logger.info(
+                        f"SSE sending historical event {i + 1}/{len(historical_to_send)}: {event.event_type} at {event.timestamp}"
+                    )
+                    yield event
+            else:
+                logger.info(
+                    "SSE connection for %s: skipping historical replay",
+                    decision_set_id,
+                )
 
             # Send ongoing events
             while True:
@@ -361,6 +392,19 @@ class StreamingService:
             del self._connections[decision_set_id]
 
         logger.info(f"Cleaned up events for decision_set: {decision_set_id}")
+
+    def reset_events(self, decision_set_id: str) -> None:
+        """
+        Reset stored events for a decision set without closing connections.
+
+        This is useful when starting a new workflow run for an existing
+        decision_set_id, preventing stale history from being replayed.
+        """
+        if decision_set_id in self._events:
+            self._events[decision_set_id] = []
+            logger.info(
+                "Reset streaming events for decision_set: %s", decision_set_id
+            )
 
     async def get_connection_count(self, decision_set_id: str) -> int:
         """

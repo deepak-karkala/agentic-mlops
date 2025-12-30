@@ -50,6 +50,19 @@ export interface StreamEvent {
   message?: string;
 }
 
+export interface CodeArtifact {
+  path: string;
+  kind?: string;
+  size_bytes?: number;
+}
+
+export interface RepositoryZip {
+  zip_key?: string;
+  size_bytes?: number;
+  s3_url?: string | null;
+  local_path?: string;
+}
+
 export interface WorkflowProgress {
   current_node?: string;
   nodes_completed: string[];
@@ -86,6 +99,8 @@ export interface StreamingState {
   reasonCards: ReasonCard[];
   workflowProgress: WorkflowProgress | null;
   currentNode: string | null;
+  codeArtifacts: CodeArtifact[];
+  repositoryZip: RepositoryZip | null;
   error: string | null;
   connectionError: boolean;
   hitlState: HITLState;
@@ -113,6 +128,8 @@ export function useStreamingEvents(options: UseStreamingEventsOptions = {}) {
     reasonCards: [],
     workflowProgress: null,
     currentNode: null,
+    codeArtifacts: [],
+    repositoryZip: null,
     error: null,
     connectionError: false,
     hitlState: {
@@ -128,6 +145,8 @@ export function useStreamingEvents(options: UseStreamingEventsOptions = {}) {
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectCountRef = useRef(0);
+  const hasConnectedRef = useRef(false);
+  const seenEventKeysRef = useRef<Set<string>>(new Set());
 
   // Get API base URL
   const getApiBaseUrl = () => {
@@ -200,6 +219,7 @@ export function useStreamingEvents(options: UseStreamingEventsOptions = {}) {
         case "node-complete":
           // Backend sends nested structure: event.data contains the actual node data
           const completedNode = event.data?.node as string;
+          const nodeOutputs = (event.data?.outputs || {}) as Record<string, any>;
 
           if (newState.workflowProgress) {
             const nodesCompleted = [
@@ -233,6 +253,13 @@ export function useStreamingEvents(options: UseStreamingEventsOptions = {}) {
             "Progress:",
             newState.workflowProgress.progress_percentage + "%",
           );
+
+          if (completedNode === "codegen") {
+            newState.codeArtifacts = (nodeOutputs.artifacts ||
+              []) as CodeArtifact[];
+            newState.repositoryZip = (nodeOutputs.repository ||
+              null) as RepositoryZip | null;
+          }
           break;
 
         case "workflow-start":
@@ -364,6 +391,16 @@ export function useStreamingEvents(options: UseStreamingEventsOptions = {}) {
     });
   }, []);
 
+  const buildEventKey = useCallback((event: StreamEvent) => {
+    const node =
+      (event.data?.node as string | undefined) ||
+      (event.data?.node_name as string | undefined) ||
+      (event.data?.nodeName as string | undefined) ||
+      (event.data?.agent as string | undefined) ||
+      "";
+    return `${event.decision_set_id}:${event.type}:${node}:${event.timestamp}`;
+  }, []);
+
   // Connect to SSE endpoint
   const connect = useCallback(
     (targetDecisionSetId?: string) => {
@@ -386,7 +423,8 @@ export function useStreamingEvents(options: UseStreamingEventsOptions = {}) {
       }));
 
       const apiBaseUrl = getApiBaseUrl();
-      const url = `${apiBaseUrl}/api/streams/${dsId}`;
+      const replay = hasConnectedRef.current ? 0 : 1;
+      const url = `${apiBaseUrl}/api/streams/${dsId}?replay=${replay}`;
 
       console.log(`Connecting to SSE endpoint: ${url}`);
 
@@ -396,6 +434,7 @@ export function useStreamingEvents(options: UseStreamingEventsOptions = {}) {
       eventSource.onopen = () => {
         console.log("SSE connection opened");
         reconnectCountRef.current = 0;
+        hasConnectedRef.current = true;
         setState((prevState) => ({
           ...prevState,
           isConnected: true,
@@ -469,6 +508,14 @@ export function useStreamingEvents(options: UseStreamingEventsOptions = {}) {
             }
 
             const data = JSON.parse(event.data);
+            const eventKey = buildEventKey(data as StreamEvent);
+            if (seenEventKeysRef.current.has(eventKey)) {
+              return;
+            }
+            seenEventKeysRef.current.add(eventKey);
+            if (seenEventKeysRef.current.size > 2000) {
+              seenEventKeysRef.current.clear();
+            }
             processStreamEvent(data as StreamEvent);
           } catch (parseError) {
             console.error(`Failed to parse ${eventType} event:`, parseError, {
@@ -487,6 +534,7 @@ export function useStreamingEvents(options: UseStreamingEventsOptions = {}) {
       reconnectDelay,
       processStreamEvent,
       clearReconnectTimeout,
+      buildEventKey,
     ],
   );
 
@@ -506,12 +554,15 @@ export function useStreamingEvents(options: UseStreamingEventsOptions = {}) {
 
   // Clear events and reason cards
   const clearEvents = useCallback(() => {
+    seenEventKeysRef.current.clear();
     setState((prevState) => ({
       ...prevState,
       events: [],
       reasonCards: [],
       workflowProgress: null,
       currentNode: null,
+      codeArtifacts: [],
+      repositoryZip: null,
       error: null,
       hitlState: {
         isActive: false,

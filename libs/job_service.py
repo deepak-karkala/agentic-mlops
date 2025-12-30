@@ -131,6 +131,42 @@ class JobService:
 
         return job
 
+    def mark_waiting_approval(self, job_id: str, worker_id: str) -> bool:
+        """
+        Mark a job as waiting for human approval.
+
+        Args:
+            job_id: ID of the job to update
+            worker_id: ID of the worker that reached the approval gate
+
+        Returns:
+            True if job was updated, False otherwise
+        """
+        job = (
+            self.session.query(Job)
+            .filter(
+                and_(
+                    Job.id == job_id,
+                    Job.worker_id == worker_id,
+                    Job.status == JobStatus.RUNNING,
+                )
+            )
+            .first()
+        )
+
+        if job:
+            job.status = JobStatus.WAITING_APPROVAL
+            job.worker_id = None
+            job.lease_expires_at = None
+            self.session.commit()
+            logger.info(
+                "Job waiting approval",
+                extra={"job_id": job_id, "worker_id": worker_id},
+            )
+            return True
+
+        return False
+
     def complete_job(self, job_id: str, worker_id: str) -> bool:
         """
         Mark a job as completed.

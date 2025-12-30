@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import os
 import uuid
 from contextlib import contextmanager
@@ -8,12 +9,14 @@ from typing import List, Literal, Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
 from sqlalchemy.orm import Session
 import logging
 import time
+from pathlib import Path
 
 from libs.graph import build_full_graph, build_thin_graph, build_streaming_test_graph, build_hitl_graph, build_hitl_enhanced_graph
 from libs.job_service import JobService, create_decision_set_for_thread
@@ -79,11 +82,29 @@ if os.getenv("LANGCHAIN_TRACING_V2"):
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 
 if ENVIRONMENT == "production":
-    # Production: Allow AWS App Runner domains (more secure than wildcard)
-    allowed_origins = [
-        # AWS App Runner domains have predictable patterns
-        "https://*.amazonaws.com",
-    ]
+    # Production: Allow Railway/cloud platform domains
+    # Railway provides RAILWAY_STATIC_URL or use explicit frontend URL
+    frontend_url = os.getenv("FRONTEND_URL", "")
+    allowed_origins = []
+
+    if frontend_url:
+        allowed_origins.append(frontend_url)
+
+    # Also allow AWS App Runner domains if still using AWS
+    if os.getenv("AWS_REGION"):
+        allowed_origins.append("https://*.amazonaws.com")
+
+    # Railway domains have pattern: https://*.up.railway.app
+    # Allow Railway domains if RAILWAY_ENVIRONMENT is set
+    if os.getenv("RAILWAY_ENVIRONMENT"):
+        allowed_origins.extend([
+            "https://*.up.railway.app",
+            "https://*.railway.app",
+        ])
+
+    # Fallback: if no specific URL configured, allow common patterns
+    if not allowed_origins:
+        allowed_origins = ["https://*.up.railway.app", "https://*.railway.app"]
 
     allow_credentials = True
     allowed_methods = ["GET", "POST", "PUT", "DELETE"]
@@ -195,29 +216,36 @@ def _canonical_node_id(*candidates: Optional[str]) -> Optional[str]:
 # Select graph based on env flag, with safe fallback
 # Support both legacy USE_FULL_GRAPH and new GRAPH_TYPE environment variables
 USE_FULL_GRAPH = os.getenv("USE_FULL_GRAPH", "false").lower() in {"1", "true", "yes"}
-GRAPH_TYPE = os.getenv("GRAPH_TYPE", "thin").lower()
+GRAPH_TYPE = os.getenv("GRAPH_TYPE", "full").lower()  # Changed default from "thin" to "full"
 
 try:
     if GRAPH_TYPE == "full" or USE_FULL_GRAPH:
-        logger.info("Initializing full graph with agent reasoning and streaming")
+        logger.info("Using full graph (RECOMMENDED) - all features enabled: HITL, streaming, checkpointing, complete agent workflow")
         _graph = build_full_graph()
     elif GRAPH_TYPE == "streaming_test":
+        logger.warning("DEPRECATED: streaming_test graph. Streaming is fully integrated in build_full_graph(). Use GRAPH_TYPE=full instead.")
         logger.info("Initializing streaming test graph with 2-agent workflow for debugging: intake_extract (30s sleep) → coverage_check (60s sleep)")
         _graph = build_streaming_test_graph()
     elif GRAPH_TYPE == "hitl":
+        logger.warning("DEPRECATED: hitl graph. Use build_full_graph() with HITL_MODE=interactive instead. Set GRAPH_TYPE=full.")
         logger.info("Initializing HITL graph for Human-in-the-Loop testing: intake_extract → coverage_check → adaptive_questions → gate_hitl → planner")
         _graph = build_hitl_graph()
     elif GRAPH_TYPE == "hitl_enhanced":
+        logger.warning("DEPRECATED: hitl_enhanced graph. Enhanced HITL features now integrated into build_full_graph(). Use GRAPH_TYPE=full instead.")
         logger.info("Initializing Enhanced HITL graph with auto-approval and loop-back: intake_extract → coverage_check → adaptive_questions → hitl_gate_user → loop-back or continue → planner")
         _graph = build_hitl_enhanced_graph()
-    else:
+    elif GRAPH_TYPE == "thin":
+        logger.warning("DEPRECATED: thin graph for testing only. Use GRAPH_TYPE=full for production. The thin graph provides minimal functionality without the full MLOps agent workflow.")
         logger.info("Initializing thin graph for fast development")
         _graph = build_thin_graph()
+    else:
+        logger.warning(f"Unknown GRAPH_TYPE '{GRAPH_TYPE}', defaulting to full graph (recommended)")
+        _graph = build_full_graph()
 except Exception as e:
     logger.warning(
-        "Graph init failed; falling back to thin graph", extra={"error": str(e)}
+        "Graph init failed; falling back to full graph", extra={"error": str(e)}
     )
-    _graph = build_thin_graph()
+    _graph = build_full_graph()  # Changed fallback from thin to full
 
 # Database setup
 engine = create_database_engine()
@@ -467,6 +495,21 @@ def approve_plan(
         hitl_status = result.get("hitl", {})
         final_status = hitl_status.get("status", "unknown")
 
+        # Mark any waiting job as completed now that approval is processed
+        waiting_job = (
+            db.query(Job)
+            .filter(
+                Job.decision_set_id == decision_set_id,
+                Job.status == JobStatus.WAITING_APPROVAL,
+            )
+            .order_by(Job.created_at.desc())
+            .first()
+        )
+        if waiting_job:
+            waiting_job.status = JobStatus.COMPLETED
+            waiting_job.completed_at = datetime.datetime.now(datetime.timezone.utc)
+            db.commit()
+
         logger.info(
             f"Plan approval processed: {req.decision}",
             extra={
@@ -499,7 +542,11 @@ def approve_plan(
 
 
 @app.get("/api/streams/{decision_set_id}")
-async def stream_workflow_progress(decision_set_id: str, db: Session = Depends(get_db)):
+async def stream_workflow_progress(
+    decision_set_id: str,
+    replay: bool = True,
+    db: Session = Depends(get_db),
+):
     """
     Stream real-time workflow progress and reason cards via Server-Sent Events (SSE).
 
@@ -580,7 +627,9 @@ async def stream_workflow_progress(decision_set_id: str, db: Session = Depends(g
             )
             event_count = 0
             # Subscribe to the streaming service for this decision set
-            async for event in streaming_service.subscribe(decision_set_id):
+            async for event in streaming_service.subscribe(
+                decision_set_id, replay_history=replay
+            ):
                 event_count += 1
 
                 # Build payload expected by the frontend hook
@@ -692,6 +741,22 @@ def get_workflow_plan() -> WorkflowPlanResponse:
 
     plan = get_execution_plan()
     return WorkflowPlanResponse(nodes=plan, graph_type=GRAPH_TYPE)
+
+
+@app.get("/api/artifacts/{zip_key}/download")
+def download_artifact(zip_key: str):
+    artifacts_dir = Path(os.getenv("ARTIFACTS_DIR", "./artifacts")).resolve()
+    safe_name = Path(zip_key).name
+    file_path = artifacts_dir / safe_name
+
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Artifact not found")
+
+    return FileResponse(
+        path=str(file_path),
+        media_type="application/zip",
+        filename=safe_name,
+    )
 
 
 # ============================================================================
@@ -825,7 +890,21 @@ class IntegratedWorkerService:
 
                 try:
                     # Process the job based on its type
-                    await self.process_job(job)
+                    outcome = await self.process_job(job)
+
+                    if outcome == "waiting_approval":
+                        success = job_service.mark_waiting_approval(
+                            job.id, self.worker_id
+                        )
+                        if success:
+                            logger.info(
+                                "Job %s waiting for approval", job.id
+                            )
+                        else:
+                            logger.warning(
+                                "Failed to mark job %s as waiting approval", job.id
+                            )
+                        return True
 
                     # Mark job as completed
                     success = job_service.complete_job(job.id, self.worker_id)
@@ -847,16 +926,16 @@ class IntegratedWorkerService:
             logger.error(f"Error claiming/processing job: {e}")
             return False
 
-    async def process_job(self, job: Job):
+    async def process_job(self, job: Job) -> str:
         """Process a specific job based on its type."""
         logger.info(f"Processing job {job.id} of type {job.job_type}")
 
         if job.job_type == "ml_workflow":
-            await self.process_ml_workflow_job(job)
+            return await self.process_ml_workflow_job(job)
         else:
             raise ValueError(f"Unknown job type: {job.job_type}")
 
-    async def process_ml_workflow_job(self, job: Job):
+    async def process_ml_workflow_job(self, job: Job) -> str:
         """Process an ML workflow job by running the LangGraph."""
         payload = job.payload
         thread_id = payload.get("thread_id")
@@ -909,6 +988,12 @@ class IntegratedWorkerService:
         streaming_service = get_streaming_service()
 
         try:
+            # Clear any stale in-memory events before starting a new run
+            streaming_service.reset_events(decision_set_id)
+            await streaming_service.emit_workflow_start(
+                decision_set_id, "Workflow started"
+            )
+
             # Use enhanced multi-mode streaming for richer agent reasoning data
             # Following LangGraph best practices: combine "updates" and "messages" modes
             stream_modes = ["updates", "messages"]
@@ -917,20 +1002,39 @@ class IntegratedWorkerService:
                 extra={"run_id": run_id, "thread_id": thread_id, "decision_set_id": decision_set_id, "stream_modes": stream_modes}
             )
 
+            # Track which nodes have completed (first occurrence) to avoid duplicate completion events
+            completed_nodes = set()
+            interrupted = False
+
             async for stream_mode, chunk in self.graph.astream(
                 state, config, stream_mode=stream_modes
             ):
+                if (
+                    stream_mode == "updates"
+                    and isinstance(chunk, dict)
+                    and "__interrupt__" in chunk
+                ):
+                    interrupted = True
                 # Process different stream modes for comprehensive agent insights
                 logger.info(
                     f"Received {stream_mode} stream chunk: {type(chunk)} keys: {list(chunk.keys()) if isinstance(chunk, dict) else 'not-dict'}"
                 )
                 await self._process_multi_mode_chunk(
-                    stream_mode, chunk, decision_set_id, streaming_service
+                    stream_mode, chunk, decision_set_id, streaming_service, completed_nodes
                 )
             logger.info(
                 f"LangGraph multi-mode streaming completed for thread {thread_id}",
                 extra={"run_id": run_id, "thread_id": thread_id, "decision_set_id": decision_set_id}
             )
+            if not interrupted:
+                await streaming_service.emit_workflow_complete(
+                    decision_set_id, "Workflow completed"
+                )
+            else:
+                logger.info(
+                    "Workflow interrupted; skipping workflow_complete emission",
+                    extra={"run_id": run_id, "thread_id": thread_id, "decision_set_id": decision_set_id},
+                )
         except Exception as stream_error:
             logger.error(
                 f"Streaming execution failed: {stream_error}",
@@ -948,11 +1052,15 @@ class IntegratedWorkerService:
             extra={"run_id": run_id, "thread_id": thread_id, "decision_set_id": decision_set_id, "job_id": job.id}
         )
 
+        if interrupted:
+            return "waiting_approval"
+
         # For now, we'll simulate some processing time
         await asyncio.sleep(2)
+        return "completed"
 
     async def _process_stream_chunk(
-        self, chunk, decision_set_id: str, streaming_service
+        self, chunk, decision_set_id: str, streaming_service, completed_nodes: set = None
     ):
         """
         Process a single stream chunk from LangGraph and emit appropriate SSE events.
@@ -961,13 +1069,21 @@ class IntegratedWorkerService:
             chunk: Stream chunk from LangGraph (contains node updates)
             decision_set_id: Decision set ID for routing SSE events
             streaming_service: Direct streaming service instance (no HTTP needed)
+            completed_nodes: Set of nodes that have already been marked as complete (tracks first occurrence)
         """
         try:
             logger.debug(f"Processing stream chunk: {chunk}")
 
+            if completed_nodes is None:
+                completed_nodes = set()
+
             # chunk format: {node_name: node_state_update}
             for node_name, node_update in chunk.items():
                 logger.info(f"Node update: {node_name} -> {node_update}")
+
+                if node_name == "__interrupt__":
+                    logger.debug("Skipping node completion for interrupt payload")
+                    continue
 
                 # Look for reason cards in the node state
                 if hasattr(node_update, "reason_cards") and node_update.reason_cards:
@@ -1108,10 +1224,27 @@ class IntegratedWorkerService:
                                 f"Unknown reason card type: {type(reason_card)}, skipping"
                             )
 
-                # Emit node completion
-                await streaming_service.emit_node_complete(
-                    decision_set_id, node_name, {}, f"Completed {node_name}"
-                )
+                # Emit node completion only once per node (first time we see it)
+                # In LangGraph's stream_mode="updates", nodes can emit multiple chunks
+                # We only want to mark a node as "complete" the first time we see it
+                if node_name not in completed_nodes:
+                    logger.info(f"Node completed (first occurrence): {node_name}")
+                    data_payload = {"node": node_name}
+                    if node_name == "codegen" and isinstance(node_update, dict):
+                        data_payload = {
+                            **data_payload,
+                            "artifacts": node_update.get("artifacts", []),
+                            "repository": node_update.get("repository", {}),
+                        }
+                    await streaming_service.emit_node_complete(
+                        decision_set_id,
+                        node_name,
+                        data_payload,
+                        f"Completed {node_name}",
+                    )
+                    completed_nodes.add(node_name)
+                else:
+                    logger.debug(f"Node update (already marked complete): {node_name}")
 
         except Exception as e:
             logger.error(f"Error processing stream chunk: {e}")
@@ -1180,7 +1313,7 @@ class IntegratedWorkerService:
         return unique_cards
 
     async def _process_multi_mode_chunk(
-        self, stream_mode: str, chunk, decision_set_id: str, streaming_service
+        self, stream_mode: str, chunk, decision_set_id: str, streaming_service, completed_nodes: set = None
     ):
         """
         Process LangGraph multi-mode stream chunks for enhanced agent reasoning.
@@ -1190,14 +1323,19 @@ class IntegratedWorkerService:
             chunk: Stream chunk data specific to the mode
             decision_set_id: Decision set ID for routing SSE events
             streaming_service: Direct streaming service instance
+            completed_nodes: Set of nodes that have already been marked as complete
         """
         try:
             logger.debug(f"Processing {stream_mode} stream chunk: {chunk}")
 
             if stream_mode == "updates":
                 # Process node state updates (contains reason cards and node execution info)
+                # Only emit node_complete for nodes we haven't seen before
+                if completed_nodes is None:
+                    completed_nodes = set()
+
                 await self._process_stream_chunk(
-                    chunk, decision_set_id, streaming_service
+                    chunk, decision_set_id, streaming_service, completed_nodes
                 )
 
             elif stream_mode == "messages":

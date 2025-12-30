@@ -254,12 +254,22 @@ def adaptive_questions(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
     # Check if questioning should continue
     coverage_score = state.get("coverage_score", 0.0)
     questioning_complete = state.get("questioning_complete", False)
+    force_questions = os.getenv("FORCE_ADAPTIVE_QUESTIONS", "").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
     # Skip if already complete or coverage is sufficient
-    if questioning_complete or coverage_score >= 0.75:
+    if not force_questions and (questioning_complete or coverage_score >= 0.75):
         logging.getLogger(__name__).info(
             "Node skip: adaptive_questions",
-            extra={"reason": "coverage_sufficient", "coverage_score": coverage_score},
+            extra={
+                "reason": "coverage_sufficient",
+                "coverage_score": coverage_score,
+                "forced": force_questions,
+            },
         )
         return {"questioning_complete": True}
 
@@ -889,6 +899,7 @@ def policy_eval(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
 def gate_hitl(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
     """Human-in-the-loop approval gate (interrupt point)."""
     from libs.streaming_service import get_streaming_service
+    import os
 
     thread_id = state.get("decision_set_id") or state.get("project_id") or "unknown"
     logger.info("Node start: gate_hitl", extra={"thread_id": thread_id})
@@ -957,28 +968,53 @@ def gate_hitl(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
         )
     )
 
-    # Interrupt and wait for human input
-    logger.info(
-        "Node interrupt: gate_hitl waiting for approval",
-        extra={
-            "thread_id": thread_id,
-            "pattern": plan.get("pattern_name", "unknown"),
-            "cost": interruption_payload["plan_summary"]["estimated_cost"],
-        },
-    )
+    hitl_mode = os.getenv("HITL_MODE", "demo")
+    timeout_seconds = int(os.getenv("HITL_DEFAULT_TIMEOUT", "8"))
+    if hitl_mode == "demo":
+        timeout_seconds = 15
 
-    # The interrupt will pause execution here and return control to the caller
-    # When resumed, the approval_data will contain the human decision
-    approval_data = interrupt(interruption_payload)
+    if hitl_mode == "demo":
+        _safe_async_run(
+            streaming_service.emit_auto_approving(
+                thread_id, timeout_seconds, {}, "gate_hitl"
+            )
+        )
+        for remaining_seconds in range(timeout_seconds, 0, -1):
+            _safe_async_run(
+                streaming_service.emit_countdown_tick(
+                    thread_id, remaining_seconds, "gate_hitl"
+                )
+            )
+            time.sleep(1)
 
-    # Process the human approval/rejection decision
-    if approval_data is None:
-        # Fallback case - auto-approve for testing
         approval_data = {
             "decision": "approved",
-            "comment": "Auto-approved (no human input received)",
+            "comment": "Auto-approved (demo mode)",
             "approved_by": "system",
         }
+    else:
+    # Interrupt and wait for human input
+        logger.info(
+            "Node interrupt: gate_hitl waiting for approval",
+            extra={
+                "thread_id": thread_id,
+                "pattern": plan.get("pattern_name", "unknown"),
+                "cost": interruption_payload["plan_summary"]["estimated_cost"],
+            },
+        )
+
+        # The interrupt will pause execution here and return control to the caller
+        # When resumed, the approval_data will contain the human decision
+        approval_data = interrupt(interruption_payload)
+
+        # Process the human approval/rejection decision
+        if approval_data is None:
+            # Fallback case - auto-approve for testing
+            approval_data = {
+                "decision": "approved",
+                "comment": "Auto-approved (no human input received)",
+                "approved_by": "system",
+            }
 
     hitl_result = {
         "status": approval_data.get("decision", "approved"),
@@ -1014,8 +1050,10 @@ def gate_hitl(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
 
 
 async def _codegen_async(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
-    """Generate repo skeletons (services, IaC, CI, docs) using Claude Code SDK."""
-    from libs.codegen_service import CodegenService, CodegenError
+    """Generate repo skeletons (services, IaC, CI, docs) using configured LLM provider."""
+    from libs.codegen_factory import get_codegen_service
+    from libs.codegen_service_openai import CodegenError
+    import os
 
     thread_id = state.get("decision_set_id") or state.get("project_id") or "unknown"
     logger = logging.getLogger(__name__)
@@ -1034,7 +1072,10 @@ async def _codegen_async(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
 
     # Check HITL approval status
     hitl_status = state.get("hitl", {})
-    if hitl_status.get("status") != "approved":
+    allow_unapproved = os.getenv("FORCE_CODEGEN", "0") == "1" or os.getenv(
+        "HITL_MODE", ""
+    ).lower() == "demo"
+    if hitl_status.get("status") != "approved" and not allow_unapproved:
         logger.warning(
             "Code generation skipped - plan not approved",
             extra={
@@ -1049,8 +1090,8 @@ async def _codegen_async(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
         }
 
     try:
-        # Initialize CodegenService
-        codegen_service = CodegenService()
+        # Get appropriate codegen service (auto-detects provider)
+        codegen_service = get_codegen_service()
 
         # Generate MLOps repository
         result = await codegen_service.generate_mlops_repository(plan)
@@ -1343,16 +1384,34 @@ def call_llm(state: MessagesState) -> MessagesState:
 
 def build_full_graph() -> Pregel:
     """
-    Build and compile the full MLOps workflow graph with real agent implementations and dual HITL gates.
+    Build the default production-ready MLOps workflow graph with all features.
 
-    This creates the complete deterministic sequential graph as specified in
-    implementation_details.md section 21.1, enhanced with two HITL interaction points:
-    1. After adaptive_questions: hitl_gate_input - for capturing missing inputs
-    2. After policy_eval: hitl_gate_final - for final approval before code generation
+    This is the RECOMMENDED graph for production use. It includes:
+    - Complete 13-node agent workflow (intake → critics → codegen → validation)
+    - Dual HITL gates: input validation + final approval
+    - Real-time SSE streaming for UI updates
+    - Async checkpointing (PostgreSQL/SQLite) for workflow persistence
+    - Smart defaults and loop-back for enhanced user experience
+    - Configurable execution modes via HITL_MODE (demo/interactive/disabled)
+
+    Graph Structure:
+        START → intake_extract → coverage_check → adaptive_questions
+        → hitl_gate_input → planner → critic_tech → critic_cost → policy_eval
+        → hitl_gate_final → codegen → validators → rationale_compile → diff_and_persist → END
+
+    Loop-back: hitl_gate_input can route back to intake_extract for refinement
+
+    Environment Variables:
+        - HITL_MODE: demo (3s auto-approve), interactive (15s), disabled (0s immediate)
+        - DISABLE_FINAL_APPROVAL: Set to "1" to skip the final approval gate
+        - GRAPH_TYPE: Set to "full" to use this graph (recommended default)
+        - DATABASE_URL: PostgreSQL/SQLite connection for checkpointing
 
     Returns:
-        Compiled StateGraph ready for execution
+        CompiledStateGraph: Compiled LangGraph workflow with checkpointing
     """
+    import os
+
     graph = StateGraph(MLOpsWorkflowState)
 
     # Add all agent nodes in the order specified in section 21.1
@@ -1372,7 +1431,12 @@ def build_full_graph() -> Pregel:
     graph.add_node("critic_tech", _wrap_with_streaming_signal("critic_tech", critic_tech))
     graph.add_node("critic_cost", _wrap_with_streaming_signal("critic_cost", critic_cost))
     graph.add_node("policy_eval", _wrap_with_streaming_signal("policy_eval", policy_eval))
-    graph.add_node("hitl_gate_final", _wrap_with_streaming_signal("hitl_gate_final", gate_hitl))
+    disable_final_approval = os.getenv("DISABLE_FINAL_APPROVAL", "0") == "1"
+    if not disable_final_approval:
+        graph.add_node(
+            "hitl_gate_final",
+            _wrap_with_streaming_signal("hitl_gate_final", gate_hitl),
+        )
     graph.add_node("codegen", _wrap_with_streaming_signal("codegen", codegen))
     graph.add_node("validators", _wrap_with_streaming_signal("validators", validators))
     graph.add_node(
@@ -1389,21 +1453,18 @@ def build_full_graph() -> Pregel:
     graph.add_edge("intake_extract", "coverage_check")
     graph.add_edge("coverage_check", "adaptive_questions")
 
-    # First HITL gate: Always trigger after adaptive_questions for now (simplified logic)
+    # First HITL gate: Always trigger after adaptive_questions
     graph.add_edge("adaptive_questions", "hitl_gate_input")
 
-    # From input HITL gate, conditionally loop back or continue
-    #graph.add_conditional_edges(
-    #    "hitl_gate_input",
-    #    should_loop_back_to_intake,
-    #    {
-    #        "loop_back": "intake_extract",
-    #        "continue": "planner"
-    #    }
-    #)
-
-    graph.add_edge("hitl_gate_input", "intake_extract")
-    graph.add_edge("intake_extract", "planner")
+    # From input HITL gate, conditionally loop back or continue to planner
+    graph.add_conditional_edges(
+        "hitl_gate_input",
+        should_loop_back_to_intake,
+        {
+            "loop_back": "intake_extract",
+            "continue": "planner"
+        }
+    )
 
 
     # Continue with planning and criticism phase
@@ -1411,31 +1472,52 @@ def build_full_graph() -> Pregel:
     graph.add_edge("critic_tech", "critic_cost")
     graph.add_edge("critic_cost", "policy_eval")
 
-    # Second HITL gate: final approval before code generation
-    graph.add_edge("policy_eval", "hitl_gate_final")
-    graph.add_edge("hitl_gate_final", "codegen")
+    # Second HITL gate: final approval before code generation (optional)
+    if disable_final_approval:
+        graph.add_edge("policy_eval", "codegen")
+    else:
+        graph.add_edge("policy_eval", "hitl_gate_final")
+        graph.add_edge("hitl_gate_final", "codegen")
     graph.add_edge("codegen", "validators")
     graph.add_edge("validators", "rationale_compile")
     graph.add_edge("rationale_compile", "diff_and_persist")
     graph.add_edge("diff_and_persist", END)
 
-    _set_execution_plan(
-        [
-            "intake_extract",
-            "coverage_check",
-            "adaptive_questions",
-            "hitl_gate_input",
-            "planner",
-            "critic_tech",
-            "critic_cost",
-            "policy_eval",
-            "hitl_gate_final",
-            "codegen",
-            "validators",
-            "rationale_compile",
-            "diff_and_persist",
-        ]
-    )
+    if not disable_final_approval:
+        _set_execution_plan(
+            [
+                "intake_extract",
+                "coverage_check",
+                "adaptive_questions",
+                "hitl_gate_input",
+                "planner",
+                "critic_tech",
+                "critic_cost",
+                "policy_eval",
+                "hitl_gate_final",
+                "codegen",
+                "validators",
+                "rationale_compile",
+                "diff_and_persist",
+            ]
+        )
+    else:
+        _set_execution_plan(
+            [
+                "intake_extract",
+                "coverage_check",
+                "adaptive_questions",
+                "hitl_gate_input",
+                "planner",
+                "critic_tech",
+                "critic_cost",
+                "policy_eval",
+                "codegen",
+                "validators",
+                "rationale_compile",
+                "diff_and_persist",
+            ]
+        )
 
     # Prefer async-compatible checkpointer when available
     checkpointer = _safe_async_run(create_async_checkpointer())
@@ -1453,16 +1535,22 @@ def build_full_graph() -> Pregel:
 
 def build_hitl_graph() -> Pregel:
     """
-    Build and compile the full MLOps workflow graph with real agent implementations.
+    DEPRECATED: Use build_full_graph() with HITL_MODE=interactive instead.
 
-    This creates the complete deterministic sequential graph as specified in
-    implementation_details.md section 21.1. The core planning nodes (planner,
-    critics, policy engine) now use the real agent implementations for
-    transparent decision making.
+    This simplified HITL graph is maintained for backward compatibility but is
+    not recommended for new development. The full graph now includes all HITL
+    features plus the complete agent workflow.
+
+    Migration: Set GRAPH_TYPE=full and HITL_MODE=interactive for the same functionality
+    with additional features (dual HITL gates, loop-back, smart defaults).
 
     Returns:
         Compiled StateGraph ready for execution
     """
+    logger.warning(
+        "build_hitl_graph() is deprecated. Use build_full_graph() with HITL_MODE=interactive instead. "
+        "Set GRAPH_TYPE=full for the recommended configuration."
+    )
     graph = StateGraph(MLOpsWorkflowState)
 
     # Add all agent nodes in the order specified in section 21.1
@@ -1508,20 +1596,25 @@ def build_hitl_graph() -> Pregel:
 
 def build_hitl_enhanced_graph() -> Pregel:
     """
-    Build enhanced HITL graph with auto-approval and loop-back functionality.
+    DEPRECATED: Enhanced HITL features now integrated into build_full_graph().
 
-    Flow: intake_extract -> coverage_check -> adaptive_questions -> hitl_gate_user
-          -> intake_extract (update) -> coverage_check (update) -> planner
+    This graph is maintained for backward compatibility. All enhanced HITL features
+    (smart defaults, auto-approval, loop-back, in-place updates) are now available
+    in the full graph with the complete agent workflow.
 
-    Features:
-    - Smart defaults generation for questions
-    - Auto-approval with configurable timeout
-    - In-place state updates (no duplicate reason cards)
-    - Context preservation across agent re-execution
+    Migration: Set GRAPH_TYPE=full to use build_full_graph() which includes:
+    - All enhanced HITL features from this graph
+    - Complete 13-node agent workflow
+    - Dual HITL gates (input + final approval)
+    - HITL_MODE configuration (demo/interactive/disabled)
 
     Returns:
         Compiled StateGraph ready for execution
     """
+    logger.warning(
+        "build_hitl_enhanced_graph() is deprecated. Enhanced HITL features are now integrated "
+        "into build_full_graph(). Set GRAPH_TYPE=full to use the recommended configuration."
+    )
     graph = StateGraph(MLOpsWorkflowState)
 
     # Add enhanced node functions
@@ -1702,15 +1795,42 @@ def hitl_gate_user(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
     # Get current questions from adaptive_questions agent
     current_questions = state.get("current_questions", [])
     if not current_questions:
-        logger.info("No questions to present, skipping HITL gate")
-        return {"user_responses": [], "execution_round": 2}
+        force_hitl = os.getenv("FORCE_HITL_INPUT", "").lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if not force_hitl:
+            logger.info("No questions to present, skipping HITL gate")
+            return {"user_responses": [], "execution_round": 2}
+
+        missing_fields = state.get("constraints", {}).get("missing_fields", [])
+        if not missing_fields:
+            missing_fields = state.get("coverage", {}).get("missing_fields", [])
+
+        summary_fields = missing_fields[:6]
+        question_text = (
+            "Please provide details for: " + ", ".join(summary_fields)
+            if summary_fields
+            else "Please review and confirm any missing requirements or preferences."
+        )
+        current_questions = [
+            {
+                "question_id": "missing_requirements",
+                "question_text": question_text,
+                "field_targets": summary_fields,
+                "priority": "high",
+                "question_type": "text",
+            }
+        ]
 
     # Get configuration
     hitl_mode = os.getenv("HITL_MODE", "demo")  # demo, interactive, disabled
     timeout_seconds = int(os.getenv("HITL_DEFAULT_TIMEOUT", "8"))
 
     if hitl_mode == "demo":
-        timeout_seconds = 3
+        timeout_seconds = 15
     elif hitl_mode == "interactive":
         timeout_seconds = 15
     elif hitl_mode == "disabled":
@@ -1773,21 +1893,22 @@ def hitl_gate_user(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
             }
         }
 
-    # Interrupt workflow for user interaction with timeout
-    logger.info(
-        f"HITL gate presenting {len(current_questions)} questions with {timeout_seconds}s timeout"
-    )
+    if hitl_mode == "demo":
+        # Auto-approval with countdown (no interrupt in demo mode)
+        _safe_async_run(
+            streaming_service.emit_auto_approving(
+                thread_id, timeout_seconds, smart_defaults, "hitl_gate_user"
+            )
+        )
+        for remaining_seconds in range(timeout_seconds, 0, -1):
+            _safe_async_run(
+                streaming_service.emit_countdown_tick(
+                    thread_id, remaining_seconds, "hitl_gate_user"
+                )
+            )
+            time.sleep(1)
 
-    # The interrupt will pause execution and wait for user input or timeout
-    user_input_data = interrupt(interruption_payload)
-
-    # Process user responses or use defaults
-    user_responses = []
-    approval_method = "user_input"
-
-    if user_input_data is None or user_input_data.get("timed_out", False):
-        # Auto-approval with defaults
-        approval_method = "auto_approved"
+        user_responses = []
         for question in current_questions:
             question_id = question.get("question_id", "")
             default_answer = smart_defaults.get(question_id, "")
@@ -1797,20 +1918,48 @@ def hitl_gate_user(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
                 "approval_method": "auto_timeout",
                 "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             })
+
+        approval_method = "auto_approved"
         logger.info(f"Auto-approved {len(user_responses)} responses after timeout")
     else:
-        # User provided responses
-        user_answers = user_input_data.get("responses", {})
-        for question in current_questions:
-            question_id = question.get("question_id", "")
-            user_answer = user_answers.get(question_id, smart_defaults.get(question_id, ""))
-            user_responses.append({
-                "question_id": question_id,
-                "answer": user_answer,
-                "approval_method": "user_input",
-                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            })
-        logger.info(f"User provided {len(user_responses)} responses")
+        # Interrupt workflow for user interaction
+        logger.info(
+            f"HITL gate presenting {len(current_questions)} questions with {timeout_seconds}s timeout"
+        )
+
+        # The interrupt will pause execution and wait for user input or timeout
+        user_input_data = interrupt(interruption_payload)
+
+        # Process user responses or use defaults
+        user_responses = []
+        approval_method = "user_input"
+
+        if user_input_data is None or user_input_data.get("timed_out", False):
+            # Auto-approval with defaults
+            approval_method = "auto_approved"
+            for question in current_questions:
+                question_id = question.get("question_id", "")
+                default_answer = smart_defaults.get(question_id, "")
+                user_responses.append({
+                    "question_id": question_id,
+                    "answer": default_answer,
+                    "approval_method": "auto_timeout",
+                    "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                })
+            logger.info(f"Auto-approved {len(user_responses)} responses after timeout")
+        else:
+            # User provided responses
+            user_answers = user_input_data.get("responses", {})
+            for question in current_questions:
+                question_id = question.get("question_id", "")
+                user_answer = user_answers.get(question_id, smart_defaults.get(question_id, ""))
+                user_responses.append({
+                    "question_id": question_id,
+                    "answer": user_answer,
+                    "approval_method": "user_input",
+                    "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                })
+            logger.info(f"User provided {len(user_responses)} responses")
 
     # Emit responses collected event
     _safe_async_run(
@@ -2062,7 +2211,26 @@ def coverage_check_enhanced(state: MLOpsWorkflowState) -> MLOpsWorkflowState:
 
 
 def build_streaming_test_graph() -> Pregel:
-    """Build a minimal two-node graph to validate real-time streaming."""
+    """
+    DEPRECATED: Streaming is fully integrated in build_full_graph().
+
+    This minimal graph is maintained for backward compatibility. Real-time SSE
+    streaming is now fully integrated into the full graph with all nodes emitting
+    streaming events.
+
+    Migration: Set GRAPH_TYPE=full to use build_full_graph() which includes:
+    - Complete SSE streaming support for all nodes
+    - Real-time reason card updates
+    - Node start/complete events
+    - Multi-mode streaming (updates + messages)
+
+    Returns:
+        Compiled StateGraph ready for execution
+    """
+    logger.warning(
+        "build_streaming_test_graph() is deprecated. Streaming is fully integrated "
+        "in build_full_graph(). Set GRAPH_TYPE=full for production use."
+    )
     from langgraph.graph import StateGraph, START, END
 
     graph = StateGraph(MLOpsWorkflowState)
@@ -2128,17 +2296,21 @@ def build_streaming_test_graph() -> Pregel:
 
 def build_thin_graph() -> Pregel:
     """
-    Build and compile the minimal deterministic LangGraph graph with checkpointing.
+    DEPRECATED: Minimal graph for testing only. Use build_full_graph() for production.
 
-    This creates a simple linear graph with a single node that processes
-    user messages and returns deterministic responses. It includes PostgreSQL
-    checkpointing for durable state when available.
+    This graph is maintained for backward compatibility but is not recommended
+    for new development. It provides only basic echo functionality without
+    the full MLOps agent workflow.
 
-    This function is kept for backward compatibility with existing tests and API.
+    Migration: Set GRAPH_TYPE=full to use the recommended full graph.
 
     Returns:
         Compiled StateGraph ready for execution
     """
+    logger.warning(
+        "build_thin_graph() is deprecated. Use build_full_graph() for production. "
+        "Set GRAPH_TYPE=full to use the recommended default."
+    )
     graph = StateGraph(MessagesState)
 
     # Add the single processing node

@@ -140,7 +140,9 @@ export default function EnhancedChatInterface({
             ? {
                 ...msg,
                 jobStatus: jobStatus.status,
-                isStreamingActive: jobStatus.status === "processing",
+                isStreamingActive: ["running", "waiting_approval"].includes(
+                  jobStatus.status,
+                ),
               }
             : msg,
         ),
@@ -300,20 +302,26 @@ Watch the Real-time Updates panel for live agent reasoning and progress updates.
   };
 
   // Get job status badge info
-  const getJobStatusBadge = (status?: string) => {
-    switch (status) {
-      case "pending":
-        return {
-          variant: "outline" as const,
-          color: "text-yellow-600",
-          text: "Pending",
-        };
-      case "processing":
-        return {
-          variant: "default" as const,
-          color: "text-blue-600",
-          text: "Processing",
-        };
+      const getJobStatusBadge = (status?: string) => {
+        switch (status) {
+          case "pending":
+            return {
+              variant: "outline" as const,
+              color: "text-yellow-600",
+              text: "Pending",
+            };
+          case "waiting_approval":
+            return {
+              variant: "outline" as const,
+              color: "text-amber-600",
+              text: "Awaiting Approval",
+            };
+          case "processing":
+            return {
+              variant: "default" as const,
+              color: "text-blue-600",
+              text: "Processing",
+            };
       case "completed":
         return {
           variant: "outline" as const,

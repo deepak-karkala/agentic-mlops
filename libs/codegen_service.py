@@ -9,6 +9,7 @@ import asyncio
 import logging
 import os
 import tempfile
+import shutil
 import zipfile
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
@@ -70,6 +71,9 @@ class CodegenService:
                 zip_path = temp_path / "mlops_repository.zip"
                 zip_key = await self._create_repository_zip(temp_path, zip_path, plan)
 
+                # Persist ZIP locally for download
+                persisted_zip = self._persist_zip(zip_path, zip_key)
+
                 # Upload to S3 if available
                 s3_url = None
                 if self.s3_client and self.s3_bucket:
@@ -78,11 +82,11 @@ class CodegenService:
                 return {
                     "artifacts": artifacts,
                     "repository_zip": {
-                        "local_path": str(zip_path),
+                        "local_path": str(persisted_zip),
                         "s3_url": s3_url,
                         "zip_key": zip_key,
-                        "size_bytes": zip_path.stat().st_size
-                        if zip_path.exists()
+                        "size_bytes": persisted_zip.stat().st_size
+                        if persisted_zip.exists()
                         else 0,
                     },
                     "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -92,6 +96,15 @@ class CodegenService:
         except Exception as e:
             logger.exception("Failed to generate MLOps repository")
             raise CodegenError(f"Repository generation failed: {str(e)}")
+
+    def _persist_zip(self, zip_path: Path, zip_key: str) -> Path:
+        artifacts_dir = Path(
+            os.getenv("ARTIFACTS_DIR", "./artifacts")
+        ).resolve()
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        target_path = artifacts_dir / zip_key
+        shutil.copyfile(zip_path, target_path)
+        return target_path
 
     async def _generate_code_with_claude(
         self, plan: Dict[str, Any], output_dir: Path

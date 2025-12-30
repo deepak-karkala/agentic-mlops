@@ -59,6 +59,8 @@ export function WorkflowContainer({
   const workflowProgress = state.workflowProgress;
   const error = state.error;
   const hitlState = state.hitlState;
+  const codeArtifacts = state.codeArtifacts ?? [];
+  const repositoryZip = state.repositoryZip ?? null;
 
   const workflowStatus = workflowProgress?.status ?? "pending";
   const isWorkflowActive = workflowStatus === "running";
@@ -181,6 +183,18 @@ export function WorkflowContainer({
     }
   };
 
+  const getDownloadUrl = () => {
+    if (!repositoryZip?.zip_key && !repositoryZip?.s3_url) {
+      return null;
+    }
+    if (repositoryZip?.s3_url) {
+      return repositoryZip.s3_url;
+    }
+    const apiBaseUrl =
+      process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+    return `${apiBaseUrl}/api/artifacts/${repositoryZip.zip_key}/download`;
+  };
+
   if (!isConnected) {
     return (
       <div
@@ -277,6 +291,42 @@ export function WorkflowContainer({
               // TODO: Send auto-approval to backend
             }}
           />
+        </div>
+      )}
+
+      {(codeArtifacts.length > 0 || repositoryZip) && (
+        <div className="p-3 border border-emerald-200 bg-emerald-50 rounded-lg">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium text-emerald-800">
+              Generated Artifacts
+            </span>
+            {getDownloadUrl() && (
+              <a
+                href={getDownloadUrl() as string}
+                className="text-xs text-emerald-700 underline"
+              >
+                Download ZIP
+              </a>
+            )}
+          </div>
+          {repositoryZip?.zip_key && (
+            <div className="mt-1 text-xs text-emerald-700">
+              {repositoryZip.zip_key}
+              {repositoryZip.size_bytes
+                ? ` · ${(repositoryZip.size_bytes / (1024 * 1024)).toFixed(2)} MB`
+                : ""}
+            </div>
+          )}
+          {codeArtifacts.length > 0 && (
+            <div className="mt-2 space-y-1 text-xs text-emerald-800">
+              {codeArtifacts.map((artifact, index) => (
+                <div key={`${artifact.path}-${index}`}>
+                  {artifact.path}
+                  {artifact.kind ? ` · ${artifact.kind}` : ""}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

@@ -184,8 +184,7 @@ class OpenAIClient:
                 "model": model,
                 "messages": messages,
             }
-            if max_tokens is not None:
-                params["max_tokens"] = max_tokens
+            self._add_max_tokens_param(params, model, max_tokens)
 
             response = await self.client.chat.completions.create(**params)
 
@@ -266,8 +265,7 @@ class OpenAIClient:
                 "messages": messages,
                 "stream": True,
             }
-            if max_tokens is not None:
-                params["max_tokens"] = max_tokens
+            self._add_max_tokens_param(params, model, max_tokens)
 
             stream = await self.client.chat.completions.create(**params)
 
@@ -362,6 +360,16 @@ Example response format:
             f"LLM Usage - Model: {model}, Tokens: {total_tokens}, "
             f"Estimated Cost: ${estimated_cost:.4f}"
         )
+
+    def _add_max_tokens_param(
+        self, params: Dict[str, Any], model: str, max_tokens: Optional[int]
+    ) -> None:
+        if max_tokens is None:
+            return
+        if model.startswith("gpt-5"):
+            params["max_completion_tokens"] = max_tokens
+        else:
+            params["max_tokens"] = max_tokens
 
     def get_usage_summary(self, hours: int = 24) -> Dict[str, Any]:
         """Get usage summary for the last N hours."""
