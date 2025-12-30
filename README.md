@@ -141,6 +141,12 @@ terraform init && terraform apply
 # 🚀 System deployed in 8 minutes
 ```
 
+![Demo Screenshot 1](docs/assets/portfolio_images/9.png)
+
+![Demo Screenshot 2](docs/assets/portfolio_images/10.png)
+
+
+
 ---
 
 ## 🏛️ Three Pillars of Intelligent MLOps Design
