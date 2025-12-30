@@ -60,6 +60,10 @@ Designing and deploying production MLOps systems traditionally requires **8-12 w
 
 ## 🚀 Product Demo: Real-Time Fraud Detection System
 
+![Demo Screenshot 1](docs/assets/portfolio_images/9.png)
+
+![Demo Screenshot 2](docs/assets/portfolio_images/10.png)
+
 ### Act 1: Natural Language Input
 
 **You provide requirements in plain English:**
@@ -140,11 +144,6 @@ cd fraud-detection-mlops
 terraform init && terraform apply
 # 🚀 System deployed in 8 minutes
 ```
-
-![Demo Screenshot 1](docs/assets/portfolio_images/9.png)
-
-![Demo Screenshot 2](docs/assets/portfolio_images/10.png)
-
 
 
 ---
