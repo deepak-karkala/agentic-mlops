@@ -649,7 +649,7 @@ Comprehensive technical documentation is available in the [`docs/`](docs/) folde
 
 **Let's connect:**
 - **Email**: dkarkala01@gmail.com
-- **LinkedIn**: [linkedin.com/in/deepakkarkala](https://linkedin.com/in/deepakkarkala)
+- **LinkedIn**: [linkedin.com/in/deepakkarkala](https://linkedin.com/in/deepak-karkala)
 - **GitHub**: [@deepak-karkala](https://github.com/deepak-karkala)
 - **Portfolio**: [deepakkarkala.com](https://deepakkarkala.com)
 
