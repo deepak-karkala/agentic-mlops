@@ -1,0 +1,86 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+venv/
+.venv/
+ENV/
+env/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Next.js
+frontend/.next/
+frontend/out/
+frontend/.cache/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Testing
+*.db
+*.db-journal
+test.db*
+*.log
+
+# Documentation (deploy only code)
+docs/
+*.md
+!README.md
+
+# Terraform (not needed for Railway)
+infra/
+*.tfstate
+*.tfstate.backup
+.terraform/
+
+# Scripts (deployment scripts not needed in container)
+scripts/
+
+# Local development files
+.env.local
+.env.*.local
+*.local
+
+# Alembic (migrations handled separately)
+alembic.ini
+alembic/
