@@ -18,6 +18,9 @@ COPY . .
 ENV NEXT_TELEMETRY_DISABLED 1
 ENV NODE_ENV production
 
+# Ensure public directory exists for Docker copy step
+RUN mkdir -p public
+
 # Build the application
 RUN npm run build
 
