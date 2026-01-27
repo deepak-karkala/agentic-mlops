@@ -62,6 +62,8 @@ function buildStreamingState(
       estimated_time_remaining_ms: 0,
     },
     currentNode: null,
+    codeArtifacts: [],
+    repositoryZip: null,
     error: null,
     connectionError: false,
     hitlState: {
