@@ -6,6 +6,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Card } from "../ui/card";
 import { Message, ChatState } from "../../types/chat";
+import { getApiBaseUrl } from "@/lib/runtime-config";
 
 export default function ChatInterface() {
   const [chatState, setChatState] = useState<ChatState>({
@@ -45,8 +46,7 @@ export default function ChatInterface() {
 
     try {
       // Call the actual API
-      const apiBaseUrl =
-        process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+      const apiBaseUrl = getApiBaseUrl();
       const response = await fetch(`${apiBaseUrl}/api/chat`, {
         method: "POST",
         headers: {

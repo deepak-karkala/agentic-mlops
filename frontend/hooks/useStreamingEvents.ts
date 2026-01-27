@@ -9,6 +9,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { getApiBaseUrl } from "@/lib/runtime-config";
 
 export type StreamEventType =
   | "reason-card"
@@ -147,13 +148,6 @@ export function useStreamingEvents(options: UseStreamingEventsOptions = {}) {
   const reconnectCountRef = useRef(0);
   const hasConnectedRef = useRef(false);
   const seenEventKeysRef = useRef<Set<string>>(new Set());
-
-  // Get API base URL
-  const getApiBaseUrl = () => {
-    return typeof window !== "undefined"
-      ? process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000"
-      : "http://localhost:8000";
-  };
 
   // Clear reconnect timeout
   const clearReconnectTimeout = useCallback(() => {

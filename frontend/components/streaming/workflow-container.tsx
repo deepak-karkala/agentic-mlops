@@ -16,6 +16,7 @@ import {
   StreamingState,
 } from "../../hooks/useStreamingEvents";
 import { getWorkflowNodeLabel } from "../../lib/workflow";
+import { getApiBaseUrl } from "@/lib/runtime-config";
 
 export interface WorkflowContainerProps {
   decisionSetId: string;
@@ -190,8 +191,7 @@ export function WorkflowContainer({
     if (repositoryZip?.s3_url) {
       return repositoryZip.s3_url;
     }
-    const apiBaseUrl =
-      process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+    const apiBaseUrl = getApiBaseUrl();
     return `${apiBaseUrl}/api/artifacts/${repositoryZip.zip_key}/download`;
   };
 

@@ -15,6 +15,7 @@ import { WorkflowVisualization } from "../streaming/workflow-visualization";
 import { EnhancedChatState, EnhancedMessage } from "@/types/enhanced-chat";
 import { LandingThemeConfig } from "@/data/landing-themes";
 import { cn } from "@/lib/utils";
+import { getApiBaseUrl } from "@/lib/runtime-config";
 
 interface EnhancedChatInterfaceProps {
   pendingPrompt?: string | null;
@@ -45,8 +46,7 @@ export default function EnhancedChatInterface({
 
     const fetchWorkflowPlan = async (attempt = 0) => {
       try {
-        const apiBaseUrl =
-          process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+        const apiBaseUrl = getApiBaseUrl();
         const response = await fetch(`${apiBaseUrl}/api/workflow/plan`);
         if (!response.ok) {
           throw new Error(`Failed to fetch workflow plan: ${response.status}`);
@@ -121,8 +121,7 @@ export default function EnhancedChatInterface({
 
   // Poll job status
   const pollJobStatus = async (jobId: string, decisionSetId: string) => {
-    const apiBaseUrl =
-      process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+    const apiBaseUrl = getApiBaseUrl();
 
     try {
       const response = await fetch(`${apiBaseUrl}/api/jobs/${jobId}/status`);
@@ -228,8 +227,7 @@ export default function EnhancedChatInterface({
 
     try {
       // Call the async API
-      const apiBaseUrl =
-        process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+      const apiBaseUrl = getApiBaseUrl();
       const response = await fetch(`${apiBaseUrl}/api/chat/async`, {
         method: "POST",
         headers: {
